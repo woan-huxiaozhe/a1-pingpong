@@ -1,6 +1,6 @@
 #include "FSM/State_RLBase.h"
 #include "unitree_articulation.h"
-#include "isaaclab/envs/mdp/observations.h"
+#include "isaaclab/envs/mdp/observations/observations.h"
 #include "isaaclab/envs/mdp/actions/joint_actions.h"
 
 State_RLBase::State_RLBase(int state_mode, std::string state_string)
@@ -8,7 +8,7 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
 {
     spdlog::info("Initializing State_{}...", state_string);
     auto cfg = param::config["FSM"][state_string];
-    auto policy_dir = parser_policy_dir(cfg["policy_dir"].as<std::string>());
+    auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
 
     env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
         YAML::LoadFile(policy_dir / "params" / "deploy.yaml"),

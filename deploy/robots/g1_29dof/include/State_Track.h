@@ -1,0 +1,28 @@
+#pragma once
+
+#include "FSM/State_RLBase.h"
+
+class State_Track : public FSMState
+{
+public:
+    State_Track(int state_mode, std::string state_string);
+
+    void enter();
+
+    void run();
+    
+    void exit()
+    {
+        policy_thread_running = false;
+        if (policy_thread.joinable()) {
+            policy_thread.join();
+        }
+    }
+
+private:
+    float time = 0.0f;
+    std::unique_ptr<isaaclab::ManagerBasedRLEnv> env;
+
+    std::thread policy_thread;
+    bool policy_thread_running = false;
+};

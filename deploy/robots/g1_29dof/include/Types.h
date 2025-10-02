@@ -11,4 +11,5 @@ enum FSMMode
     Passive = 1,
     FixStand = 2,
     Velocity = 3,
+    Dance = 4,
 };

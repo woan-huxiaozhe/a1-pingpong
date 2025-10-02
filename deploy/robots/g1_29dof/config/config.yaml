@@ -33,5 +33,9 @@ FSM:
       ]
     ]
   Velocity:
-    # policy_dir: config/policy/velocity
-    policy_dir: ../../../logs/rsl_rl/unitree_g1_29dof_velocity
+    policy_dir: config/policy/velocity
+    # policy_dir: ../../../logs/rsl_rl/unitree_g1_29dof_velocity
+  Dance:
+    policy_dir: config/policy/dance
+    motion_file: /mnt/remote/unitree/gitlab/unitree_rl_lab/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/g1/29dof/dance/dance1_subject2_250_550.csv
+    fps: 30

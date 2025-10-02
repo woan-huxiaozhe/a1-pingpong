@@ -24,6 +24,33 @@ REGISTER_OBSERVATION(projected_gravity)
     return std::vector<float>(data.data(), data.data() + data.size());
 }
 
+REGISTER_OBSERVATION(joint_pos)
+{
+    auto & asset = env->robot;
+    std::vector<float> data;
+
+    auto cfg = env->cfg["observations"]["joint_pos"];
+    if(cfg["params"]["asset_cfg"]["joint_ids"].IsDefined())
+    {
+        auto joint_ids = cfg["params"]["asset_cfg"]["joint_ids"].as<std::vector<int>>();
+        data.resize(joint_ids.size());
+        for(size_t i = 0; i < joint_ids.size(); ++i)
+        {
+            data[i] = asset->data.joint_pos[joint_ids[i]];
+        }
+    }
+    else
+    {
+        data.resize(asset->data.joint_pos.size());
+        for(size_t i = 0; i < asset->data.joint_pos.size(); ++i)
+        {
+            data[i] = asset->data.joint_pos[i];
+        }
+    }
+
+    return data;
+}
+
 REGISTER_OBSERVATION(joint_pos_rel)
 {
     auto & asset = env->robot;

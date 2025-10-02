@@ -5,6 +5,7 @@
 
 #include <eigen3/Eigen/Dense>
 #include "unitree/dds_wrapper/common/unitree_joystick.hpp"
+#include "isaaclab/envs/mdp/commands/motion_command.h"
 
 namespace isaaclab
 {
@@ -32,9 +33,13 @@ struct ArticulationData
     // Projection of the gravity direction on base frame.
     Eigen::Vector3f projected_gravity_b;
 
+    Eigen::Quaternionf root_quat_b;
+
     std::vector<float> joint_ids_map;
 
     unitree::common::UnitreeJoystick* joystick = nullptr;
+
+    isaaclab::MotionLoader* motion_loader = nullptr;
 };
 
 class Articulation
