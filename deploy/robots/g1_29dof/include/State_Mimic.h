@@ -2,10 +2,10 @@
 
 #include "FSM/State_RLBase.h"
 
-class State_Track : public FSMState
+class State_Mimic : public FSMState
 {
 public:
-    State_Track(int state_mode, std::string state_string);
+    State_Mimic(int state_mode, std::string state_string);
 
     void enter();
 

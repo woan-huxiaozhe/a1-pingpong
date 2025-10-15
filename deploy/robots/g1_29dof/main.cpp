@@ -2,7 +2,7 @@
 #include "FSM/State_Passive.h"
 #include "FSM/State_FixStand.h"
 #include "FSM/State_RLBase.h"
-#include "State_Track.h"
+#include "State_Mimic.h"
 
 std::unique_ptr<LowCmd_t> FSMState::lowcmd = nullptr;
 std::shared_ptr<LowState_t> FSMState::lowstate = nullptr;
@@ -63,11 +63,12 @@ int main(int argc, char** argv)
     fsm->add(new State_RLBase(FSMMode::Velocity, "Velocity"));
     fsm->states.back()->registered_checks.emplace_back(
         std::make_pair(
-            [&]()->bool{ return joy.RB.pressed && joy.RB.pressed_time > 2.0 && joy.down.on_pressed; }, // R1(2s) + down
-            FSMMode::Dance
+            // L2(2s) + down, avoid mis-operation
+            [&]()->bool{ return joy.LT.pressed && joy.LT.pressed_time > 2.0 && joy.down.on_pressed; },
+            FSMMode::Dance_001
         )
     );
-    fsm->add(new State_Track(FSMMode::Dance, "Dance"));
+    fsm->add(new State_Mimic(FSMMode::Dance_001, "Dance_001"));
 
     std::cout << "Press [L2 + Up] to enter FixStand mode.\n";
     std::cout << "And then press [R1 + X] to start controlling the robot.\n";

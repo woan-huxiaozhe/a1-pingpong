@@ -5,10 +5,11 @@
 
 #include <eigen3/Eigen/Dense>
 #include "unitree/dds_wrapper/common/unitree_joystick.hpp"
-#include "isaaclab/envs/mdp/commands/motion_command.h"
 
 namespace isaaclab
 {
+
+class MotionLoader;
 
 struct ArticulationData
 {

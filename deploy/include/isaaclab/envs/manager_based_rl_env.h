@@ -7,6 +7,7 @@
 #include <yaml-cpp/yaml.h>
 #include "isaaclab/manager/observation_manager.h"
 #include "isaaclab/manager/action_manager.h"
+#include "isaaclab/envs/mdp/commands/motion_command.h"
 #include "isaaclab/assets/articulation/articulation.h"
 #include "isaaclab/algorithms/algorithms.h"
 #include <iostream>
@@ -50,8 +51,12 @@ public:
     {
         global_phase = 0;
         episode_length = 0;
+        robot->update();
         action_manager->reset();
         observation_manager->reset();
+        if(robot->data.motion_loader) {
+            robot->data.motion_loader->reset(robot->data);
+        }
     }
 
     void step()

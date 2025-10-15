@@ -1,10 +1,10 @@
-#include "State_Track.h"
+#include "State_Mimic.h"
 #include "unitree_articulation.h"
 #include "isaaclab/envs/mdp/observations/observations.h"
 #include "isaaclab/envs/mdp/observations/motion_observations.h"
 #include "isaaclab/envs/mdp/actions/joint_actions.h"
 
-State_Track::State_Track(int state_mode, std::string state_string)
+State_Mimic::State_Mimic(int state_mode, std::string state_string)
 : FSMState(state_mode, state_string) 
 {
     spdlog::info("Initializing State_{}...", state_string);
@@ -12,10 +12,13 @@ State_Track::State_Track(int state_mode, std::string state_string)
     auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
 
     auto articulation = std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate);
-    articulation->data.motion_loader = new isaaclab::MotionLoader(
-        cfg["motion_file"].as<std::string>(),
-        cfg["fps"].as<float>(50.0f)
-    );
+
+    std::filesystem::path motion_file = cfg["motion_file"].as<std::string>();
+    if(!motion_file.is_absolute()) {
+        motion_file = param::proj_dir / motion_file;
+    }
+
+    articulation->data.motion_loader = new isaaclab::MotionLoader(motion_file.string(), cfg["fps"].as<float>());
     env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
         YAML::LoadFile(policy_dir / "params" / "deploy.yaml"),
         articulation
@@ -43,7 +46,7 @@ State_Track::State_Track(int state_mode, std::string state_string)
     );
 }
 
-void State_Track::enter()
+void State_Mimic::enter()
 {
     // set gain
     for (int i = 0; i < env->robot->data.joint_stiffness.size(); ++i)
@@ -54,7 +57,6 @@ void State_Track::enter()
         lowcmd->msg_.motor_cmd()[i].tau() = 0;
     }
 
-    time = 0.0f;
     env->robot->update();
     env->reset();
 
@@ -67,12 +69,13 @@ void State_Track::enter()
 
         // Initialize timing
         const auto start = clock::now();
+        time = 0.0f;
         auto sleepTill = start + dt;
 
         while (policy_thread_running)
         {
             time += env->step_dt;
-            env->robot->data.motion_loader->sample(time);
+            env->robot->data.motion_loader->update(time);
             env->step();
 
             // Sleep
@@ -83,7 +86,7 @@ void State_Track::enter()
 }
 
 
-void State_Track::run()
+void State_Mimic::run()
 {
     auto action = env->action_manager->processed_actions();
     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {

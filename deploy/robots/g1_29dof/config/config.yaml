@@ -1,5 +1,12 @@
 FSM:
   Passive:
+    mode: [
+      1,1,1,1,1,1,
+      1,1,1,1,1,1,
+      1,1,1,
+      1,1,1,1,1,1,1,
+      1,1,1,1,1,1,1,
+    ]
     kd: [
       3,3,3,3,3,3,
       3,3,3,3,3,3,
@@ -36,6 +43,6 @@ FSM:
     policy_dir: config/policy/velocity
     # policy_dir: ../../../logs/rsl_rl/unitree_g1_29dof_velocity
   Dance:
-    policy_dir: config/policy/dance
-    motion_file: /mnt/remote/unitree/gitlab/unitree_rl_lab/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/g1/29dof/dance/dance1_subject2_250_550.csv
-    fps: 30
+    fps: 60
+    motion_file: config/policy/mimic/001/params/G1_dance_001_60hz.csv
+    policy_dir: config/policy/mimic/001/

@@ -10,6 +10,7 @@
 #include <eigen3/Eigen/Dense>
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include "isaaclab/assets/articulation/articulation.h"
 
 namespace isaaclab
 {
@@ -29,19 +30,25 @@ public:
         for(int i(0); i < num_frames; ++i)
         {
             root_positions.push_back(Eigen::VectorXf::Map(data[i].data(), 3));
-            root_quaternions.push_back(Eigen::Quaternionf(data[i][3], data[i][4], data[i][5], data[i][6]));
+            root_quaternions.push_back(Eigen::Quaternionf(data[i][6],data[i][3], data[i][4], data[i][5]));
             dof_positions.push_back(Eigen::VectorXf::Map(data[i].data() + 7, data[i].size() - 7));
         }
+        dof_velocities = _comupte_raw_derivative(dof_positions);
 
-        sample(0.0f);
+        update(0.0f);
     }
 
-    void sample(float time) 
+    void update(float time) 
     {
         float phase = std::clamp(time / duration, 0.0f, 1.0f);
         index_0_ = std::round(phase * (num_frames - 1));
         index_1_ = std::min(index_0_ + 1, num_frames - 1);
         blend_ = std::round((time - index_0_ * dt) / dt * 1e5f) / 1e5f;
+    }
+
+    void reset(const ArticulationData & data)
+    {
+        update(0.0f);
     }
 
     Eigen::VectorXf joint_pos() {
@@ -50,6 +57,10 @@ public:
 
     Eigen::VectorXf root_position() {
         return root_positions[index_0_] * (1 - blend_) + root_positions[index_1_] * blend_;
+    }
+
+    Eigen::VectorXf joint_vel() {
+        return dof_velocities[index_0_] * (1 - blend_) + dof_velocities[index_1_] * blend_;
     }
 
     Eigen::Quaternionf root_quaternion() {
@@ -63,11 +74,22 @@ public:
     std::vector<Eigen::VectorXf> root_positions;
     std::vector<Eigen::Quaternionf> root_quaternions;
     std::vector<Eigen::VectorXf> dof_positions;
+    std::vector<Eigen::VectorXf> dof_velocities;
 
 private:
     int index_0_;
     int index_1_;
     float blend_;
+
+    std::vector<Eigen::VectorXf> _comupte_raw_derivative(const std::vector<Eigen::VectorXf>& data)
+    {
+        std::vector<Eigen::VectorXf> derivative;
+        for(int i = 0; i < data.size() - 1; ++i) {
+            derivative.push_back((data[i + 1] - data[i]) / dt);
+        }
+        derivative.push_back(derivative.back());
+        return derivative;
+    }
 
     std::vector<std::vector<float>> _read_csv(const std::string& filename)
     {
