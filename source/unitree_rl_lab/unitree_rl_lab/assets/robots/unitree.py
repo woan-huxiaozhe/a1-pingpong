@@ -70,8 +70,14 @@ class UnitreeUrdfFileCfg(sim_utils.UrdfFileCfg):
         max_depenetration_velocity=1.0,
     )
 
-    def replace_asset(self, meshes_dir, asset_path):
-        """Replace the asset with a temporary copy to avoid modifying the original asset."""
+    def replace_asset(self, meshes_dir, urdf_path):
+        """Replace the asset with a temporary copy to avoid modifying the original asset.
+
+        When need to change the collisions, place the modified URDF file separately in this repository,
+        and let `meshes_dir` be provided by `unitree_ros`.
+        This function will auto construct a complete `robot_description` file structure in the `/tmp` directory.
+        Note: The mesh references inside the URDF should be in the same directory level as the URDF itself.
+        """
         tmp_meshes_dir = "/tmp/IsaacLab/unitree_rl_lab/meshes"
         if os.path.exists(tmp_meshes_dir):
             os.remove(tmp_meshes_dir)
@@ -81,7 +87,7 @@ class UnitreeUrdfFileCfg(sim_utils.UrdfFileCfg):
         self.asset_path = "/tmp/IsaacLab/unitree_rl_lab/robot.urdf"
         if os.path.exists(self.asset_path):
             os.remove(self.asset_path)
-        os.symlink(asset_path, self.asset_path)
+        os.symlink(urdf_path, self.asset_path)
 
 
 """ Configuration for the Unitree robots."""

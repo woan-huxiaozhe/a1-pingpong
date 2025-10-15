@@ -53,7 +53,7 @@ Currently supports Unitree **Go2**, **H1** and **G1-29dof** robots.
   - Listing the available tasks:
 
     ```bash
-    python scripts/list_envs.py
+    python scripts/list_envs.py # This is a faster version than isaaclab
     ```
   - Running a task:
 
