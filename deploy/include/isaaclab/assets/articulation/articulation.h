@@ -34,7 +34,7 @@ struct ArticulationData
     // Projection of the gravity direction on base frame.
     Eigen::Vector3f projected_gravity_b;
 
-    Eigen::Quaternionf root_quat_b;
+    Eigen::Quaternionf root_quat_w;
 
     std::vector<float> joint_ids_map;
 

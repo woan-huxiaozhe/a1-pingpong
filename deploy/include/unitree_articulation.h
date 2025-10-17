@@ -25,13 +25,13 @@ public:
             data.root_ang_vel_b[i] = lowstate->msg_.imu_state().gyroscope()[i];
         }
         // project_gravity_body
-        data.root_quat_b = Eigen::Quaternionf(
+        data.root_quat_w = Eigen::Quaternionf(
             lowstate->msg_.imu_state().quaternion()[0],
             lowstate->msg_.imu_state().quaternion()[1],
             lowstate->msg_.imu_state().quaternion()[2],
             lowstate->msg_.imu_state().quaternion()[3]
         );
-        data.projected_gravity_b = data.root_quat_b.conjugate() * data.GRAVITY_VEC_W;
+        data.projected_gravity_b = data.root_quat_w.conjugate() * data.GRAVITY_VEC_W;
         // joint positions and velocities
         for(int i(0); i< data.joint_ids_map.size(); i++) {
             data.joint_pos[i] = lowstate->msg_.motor_state()[data.joint_ids_map[i]].q();

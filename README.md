@@ -128,3 +128,4 @@ This repository is built upon the support and contributions of the following ope
 - [IsaacLab](https://github.com/isaac-sim/IsaacLab): The foundation for training and running codes.
 - [mujoco](https://github.com/google-deepmind/mujoco.git): Providing powerful simulation functionalities.
 - [robot_lab](https://github.com/fan-ziqi/robot_lab): Referenced for project structure and parts of the implementation.
+- [whole_body_tracking](https://github.com/HybridRobotics/whole_body_tracking): Versatile humanoid control framework for motion tracking.

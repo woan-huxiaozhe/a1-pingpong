@@ -52,17 +52,20 @@ public:
         global_phase = 0;
         episode_length = 0;
         robot->update();
-        action_manager->reset();
-        observation_manager->reset();
         if(robot->data.motion_loader) {
             robot->data.motion_loader->reset(robot->data);
         }
+        action_manager->reset();
+        observation_manager->reset();
     }
 
     void step()
     {
         episode_length += 1;
         robot->update();
+        if(robot->data.motion_loader) {
+            robot->data.motion_loader->update(episode_length * step_dt);
+        }
         auto obs = observation_manager->compute();
         auto action = alg->act(obs);
         action_manager->process_action(action);

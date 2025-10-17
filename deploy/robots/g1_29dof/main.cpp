@@ -65,10 +65,18 @@ int main(int argc, char** argv)
         std::make_pair(
             // L2(2s) + down, avoid mis-operation
             [&]()->bool{ return joy.LT.pressed && joy.LT.pressed_time > 2.0 && joy.down.on_pressed; },
-            FSMMode::Dance_001
+            FSMMode::Mimic_Dance_102
         )
     );
-    fsm->add(new State_Mimic(FSMMode::Dance_001, "Dance_001"));
+    fsm->states.back()->registered_checks.emplace_back(
+        std::make_pair(
+            // L2(2s) + left, avoid mis-operation
+            [&]()->bool{ return joy.LT.pressed && joy.LT.pressed_time > 2.0 && joy.left.on_pressed; },
+            FSMMode::Mimic_Gangnam_Style
+        )
+    );
+    fsm->add(new State_Mimic(FSMMode::Mimic_Dance_102, "Mimic_Dance_102"));
+    fsm->add(new State_Mimic(FSMMode::Mimic_Gangnam_Style, "Mimic_Gangnam_Style"));
 
     std::cout << "Press [L2 + Up] to enter FixStand mode.\n";
     std::cout << "And then press [R1 + X] to start controlling the robot.\n";

@@ -20,7 +20,6 @@ public:
     }
 
 private:
-    float time = 0.0f;
     std::unique_ptr<isaaclab::ManagerBasedRLEnv> env;
 
     std::thread policy_thread;

@@ -4,6 +4,59 @@
 #include "isaaclab/envs/mdp/observations/motion_observations.h"
 #include "isaaclab/envs/mdp/actions/joint_actions.h"
 
+static Eigen::Quaternionf init_quat; // TODO: move to env->reset()
+
+Eigen::Quaternionf torso_quat_w(isaaclab::ManagerBasedRLEnv* env) {
+    using G1Type = unitree::BaseArticulation<LowState_t::SharedPtr>;
+    G1Type* robot = dynamic_cast<G1Type*>(env->robot.get());
+
+    auto root_quat = env->robot->data.root_quat_w;
+    auto & motors = robot->lowstate->msg_.motor_state();
+
+    Eigen::Quaternionf torso_quat = root_quat \
+        * Eigen::AngleAxisf(motors[12].q(), Eigen::Vector3f::UnitZ()) \
+        * Eigen::AngleAxisf(motors[13].q(), Eigen::Vector3f::UnitX()) \
+        * Eigen::AngleAxisf(motors[14].q(), Eigen::Vector3f::UnitY()) \
+    ;
+    return torso_quat;
+};
+
+Eigen::Quaternionf anchor_quat_w(isaaclab::MotionLoader* loader)
+{
+    const auto root_quat = loader->root_quaternion();
+    const auto joint_pos = loader->joint_pos();
+    Eigen::Quaternionf torso_ori = root_quat \
+        * Eigen::AngleAxisf(joint_pos[12], Eigen::Vector3f::UnitZ()) \
+        * Eigen::AngleAxisf(joint_pos[13], Eigen::Vector3f::UnitX()) \
+        * Eigen::AngleAxisf(joint_pos[14], Eigen::Vector3f::UnitY()) \
+    ;
+    return torso_ori;
+}
+
+
+namespace isaaclab
+{
+namespace mdp
+{
+
+REGISTER_OBSERVATION(motion_anchor_ori_b)
+{
+    // auto & robot = env->robot;
+    auto real_quat_w = torso_quat_w(env);
+    auto ref_quat_w = anchor_quat_w(env->robot->data.motion_loader);
+
+    auto rot_ = (init_quat * ref_quat_w).conjugate() * real_quat_w;
+    auto rot = rot_.toRotationMatrix().transpose();
+
+    Eigen::Matrix<float, 6, 1> data;
+    data << rot(0, 0), rot(0, 1), rot(1, 0), rot(1, 1), rot(2, 0), rot(2, 1);
+    return std::vector<float>(data.data(), data.data() + data.size());
+}
+
+}
+}
+
+
 State_Mimic::State_Mimic(int state_mode, std::string state_string)
 : FSMState(state_mode, state_string) 
 {
@@ -25,10 +78,10 @@ State_Mimic::State_Mimic(int state_mode, std::string state_string)
     );
     env->alg = std::make_unique<isaaclab::OrtRunner>(policy_dir / "exported" / "policy.onnx");
 
-    auto & joy = FSMState::lowstate->joystick;
+    const auto & joy = FSMState::lowstate->joystick;
     this->registered_checks.emplace_back(
         std::make_pair(
-            [&]()->bool{ return time > env->robot->data.motion_loader->duration; }, // time out
+            [&]()->bool{ return (env->episode_length * env->step_dt) > env->robot->data.motion_loader->duration; }, // time out
             (int)FSMMode::Velocity
         )
     );
@@ -57,9 +110,7 @@ void State_Mimic::enter()
         lowcmd->msg_.motor_cmd()[i].tau() = 0;
     }
 
-    env->robot->update();
-    env->reset();
-
+    env->reset(); // Update robot state for init_quat calculation
     // Start policy thread
     policy_thread_running = true;
     policy_thread = std::thread([this]{
@@ -69,13 +120,15 @@ void State_Mimic::enter()
 
         // Initialize timing
         const auto start = clock::now();
-        time = 0.0f;
         auto sleepTill = start + dt;
+
+        auto ref_yaw = isaaclab::yawQuaternion(env->robot->data.motion_loader->root_quaternion()).toRotationMatrix();
+        auto robot_yaw = isaaclab::yawQuaternion(torso_quat_w(env.get())).toRotationMatrix();
+        init_quat = robot_yaw * ref_yaw.transpose();
+        env->reset();
 
         while (policy_thread_running)
         {
-            time += env->step_dt;
-            env->robot->data.motion_loader->update(time);
             env->step();
 
             // Sleep

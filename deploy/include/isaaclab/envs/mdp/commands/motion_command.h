@@ -15,6 +15,13 @@
 namespace isaaclab
 {
 
+inline Eigen::Quaternionf yawQuaternion(const Eigen::Quaternionf& q) {
+  float yaw = std::atan2(2.0f * (q.w() * q.z() + q.x() * q.y()), 1.0f - 2.0f * (q.y() * q.y() + q.z() * q.z()));
+  float half_yaw = yaw * 0.5f;
+  Eigen::Quaternionf ret(std::cos(half_yaw), 0.0f, 0.0f, std::sin(half_yaw));
+  return ret.normalized();
+};
+
 /* Unitree CSV Motion File */
 class MotionLoader
 {
@@ -49,6 +56,9 @@ public:
     void reset(const ArticulationData & data)
     {
         update(0.0f);
+        auto init_to_anchor = yawQuaternion(this->root_quaternion()).toRotationMatrix();
+        auto world_to_anchor = yawQuaternion(data.root_quat_w).toRotationMatrix();
+        world_to_init_ = world_to_anchor * init_to_anchor.transpose();
     }
 
     Eigen::VectorXf joint_pos() {
@@ -76,6 +86,7 @@ public:
     std::vector<Eigen::VectorXf> dof_positions;
     std::vector<Eigen::VectorXf> dof_velocities;
 
+    Eigen::Matrix3f world_to_init_;
 private:
     int index_0_;
     int index_1_;

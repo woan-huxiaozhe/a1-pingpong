@@ -3,7 +3,7 @@
 .. code-block:: bash
 
     # Usage
-    python csv_to_npz.py --input_file path_to_input.csv --input_fps 30 --output_fps 50
+    python csv_to_npz.py -f path_to_input.csv --input_fps 60
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -16,7 +16,7 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Replay motion from csv file and output to npz file.")
 parser.add_argument("--input_file", "-f", type=str, required=True, help="The path to the input motion csv file.")
-parser.add_argument("--input_fps", type=int, default=30, help="The fps of the input motion.")
+parser.add_argument("--input_fps", type=int, default=60, help="The fps of the input motion.")
 parser.add_argument(
     "--frame_range",
     nargs=2,

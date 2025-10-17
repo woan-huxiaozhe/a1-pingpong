@@ -87,7 +87,7 @@ class CommandsCfg:
 
     motion = mdp.MotionCommandCfg(
         asset_name="robot",
-        motion_file=f"{os.path.dirname(__file__)}/G1_Take_102.bvh_60hz.npz",
+        motion_file=f"{os.path.dirname(__file__)}/G1_gangnam_style_V01.bvh_60hz.npz",
         anchor_body_name="torso_link",
         resampling_time_range=(1.0e9, 1.0e9),
         debug_vis=True,

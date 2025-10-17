@@ -38,20 +38,26 @@ REGISTER_OBSERVATION(motion_joint_vel)
     return std::vector<float>(data_bfs.data(), data_bfs.data() + data_bfs.size());
 }
 
-REGISTER_OBSERVATION(motion_root_pos)
+REGISTER_OBSERVATION(motion_command)
 {
     auto & robot = env->robot;
     auto & loader = robot->data.motion_loader;
-    auto data = loader->root_position();
-    return std::vector<float>(data.data(), data.data() + data.size());
-}
+    auto & ids = robot->data.joint_ids_map;
 
-REGISTER_OBSERVATION(motion_root_quat)
-{
-    auto & robot = env->robot;
-    auto & loader = robot->data.motion_loader;
-    auto quat = loader->root_quaternion();
-    return std::vector<float>({quat.w(), quat.x(), quat.y(), quat.z()});
+    auto pos_dfs = loader->joint_pos();
+    Eigen::VectorXf pos_bfs = Eigen::VectorXf::Zero(pos_dfs.size());
+    for(int i = 0; i < pos_dfs.size(); ++i) {
+        pos_bfs(i) = pos_dfs[ids[i]];
+    }
+    auto vel_dfs = loader->joint_vel();
+    Eigen::VectorXf vel_bfs = Eigen::VectorXf::Zero(vel_dfs.size());
+    for(int i = 0; i < vel_dfs.size(); ++i) {
+        vel_bfs(i) = vel_dfs[ids[i]];
+    }
+    std::vector<float> data;
+    data.insert(data.end(), pos_bfs.data(), pos_bfs.data() + pos_bfs.size());
+    data.insert(data.end(), vel_bfs.data(), vel_bfs.data() + vel_bfs.size());
+    return data;
 }
 
 } // namespace mdp

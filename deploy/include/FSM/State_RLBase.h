@@ -24,8 +24,6 @@ public:
         }
 
         env->robot->update();
-        env->reset();
-
         // Start policy thread
         policy_thread_running = true;
         policy_thread = std::thread([this]{
@@ -34,8 +32,8 @@ public:
             const auto dt = std::chrono::duration_cast<clock::duration>(desiredDuration);
 
             // Initialize timing
-            const auto start = clock::now();
-            auto sleepTill = start + dt;
+            auto sleepTill = clock::now() + dt;
+            env->reset();
 
             while (policy_thread_running)
             {
