@@ -11,4 +11,7 @@ enum FSMMode
     Passive = 1,
     FixStand = 2,
     Velocity = 3,
+    
+    Mimic_Dance_102 = 101,
+    Mimic_Gangnam_Style = 102,
 };

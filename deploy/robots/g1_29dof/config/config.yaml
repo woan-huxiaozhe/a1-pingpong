@@ -1,5 +1,12 @@
 FSM:
   Passive:
+    mode: [
+      1,1,1,1,1,1,
+      1,1,1,1,1,1,
+      1,1,1,
+      1,1,1,1,1,1,1,
+      1,1,1,1,1,1,1,
+    ]
     kd: [
       3,3,3,3,3,3,
       3,3,3,3,3,3,
@@ -33,5 +40,14 @@ FSM:
       ]
     ]
   Velocity:
-    # policy_dir: config/policy/velocity
-    policy_dir: ../../../logs/rsl_rl/unitree_g1_29dof_velocity
+    policy_dir: config/policy/velocity
+    # policy_dir: ../../../logs/rsl_rl/unitree_g1_29dof_velocity
+  Mimic_Dance_102:
+    fps: 60
+    motion_file: config/policy/mimic/dance_102/params/G1_Take_102.bvh_60hz.csv
+    policy_dir: config/policy/mimic/dance_102/
+  Mimic_Gangnam_Style:
+    fps: 60
+    motion_file: config/policy/mimic/gangnam_style/params/G1_gangnam_style_V01.bvh_60hz.csv
+    policy_dir: config/policy/mimic/gangnam_style/
+
