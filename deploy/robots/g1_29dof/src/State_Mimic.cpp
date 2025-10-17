@@ -25,12 +25,12 @@ Eigen::Quaternionf anchor_quat_w(isaaclab::MotionLoader* loader)
 {
     const auto root_quat = loader->root_quaternion();
     const auto joint_pos = loader->joint_pos();
-    Eigen::Quaternionf torso_ori = root_quat \
+    Eigen::Quaternionf torso_quat = root_quat \
         * Eigen::AngleAxisf(joint_pos[12], Eigen::Vector3f::UnitZ()) \
         * Eigen::AngleAxisf(joint_pos[13], Eigen::Vector3f::UnitX()) \
         * Eigen::AngleAxisf(joint_pos[14], Eigen::Vector3f::UnitY()) \
     ;
-    return torso_ori;
+    return torso_quat;
 }
 
 

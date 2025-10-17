@@ -4,10 +4,6 @@ from isaaclab.assets.articulation import ArticulationCfg
 
 from unitree_rl_lab.assets.robots import unitree
 
-# UNITREE_MODEL_DIR = unitree.UNITREE_MODEL_DIR
-UNITREE_MODEL_DIR = "/mnt/remote/unitree/huggingface/unitree_model"
-
-
 ARMATURE_5020 = 0.003609725
 ARMATURE_7520_14 = 0.010177520
 ARMATURE_7520_22 = 0.025101925
@@ -28,7 +24,7 @@ DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ  # 1.068141502
 
 G1_CYLINDER_CFG = unitree.UnitreeArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{UNITREE_MODEL_DIR}/G1/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd",
+        usd_path=f"{unitree.UNITREE_MODEL_DIR}/G1/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -178,37 +174,7 @@ G1_CYLINDER_CFG = unitree.UnitreeArticulationCfg(
             },
         ),
     },
-    joint_sdk_names=[
-        "left_hip_pitch_joint",
-        "left_hip_roll_joint",
-        "left_hip_yaw_joint",
-        "left_knee_joint",
-        "left_ankle_pitch_joint",
-        "left_ankle_roll_joint",
-        "right_hip_pitch_joint",
-        "right_hip_roll_joint",
-        "right_hip_yaw_joint",
-        "right_knee_joint",
-        "right_ankle_pitch_joint",
-        "right_ankle_roll_joint",
-        "waist_yaw_joint",
-        "waist_roll_joint",
-        "waist_pitch_joint",
-        "left_shoulder_pitch_joint",
-        "left_shoulder_roll_joint",
-        "left_shoulder_yaw_joint",
-        "left_elbow_joint",
-        "left_wrist_roll_joint",
-        "left_wrist_pitch_joint",
-        "left_wrist_yaw_joint",
-        "right_shoulder_pitch_joint",
-        "right_shoulder_roll_joint",
-        "right_shoulder_yaw_joint",
-        "right_elbow_joint",
-        "right_wrist_roll_joint",
-        "right_wrist_pitch_joint",
-        "right_wrist_yaw_joint",
-    ],
+    joint_sdk_names=unitree.UNITREE_G1_29DOF_CFG.joint_sdk_names,
 )
 
 G1_ACTION_SCALE = {}

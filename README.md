@@ -36,8 +36,8 @@ Currently supports Unitree **Go2**, **H1** and **G1-29dof** robots.
     conda activate env_isaaclab
     python -m pip install -e source/unitree_rl_lab
     ```
-- Download unitree usd files
-
+- Download unitree robot description files
+  *Method 1: Using USD Files*
   - Download unitree usd files from [unitree_model](https://huggingface.co/datasets/unitreerobotics/unitree_model/tree/main), keeping folder structure
     ```bash
     git lfs install
@@ -48,6 +48,20 @@ Currently supports Unitree **Go2**, **H1** and **G1-29dof** robots.
     ```bash
     UNITREE_MODEL_DIR = "</home/user/projects/unitree_usd>"
     ```
+
+  *Method 2: Using URDF Files [Recommended]* Isaacsim 5.0
+  -  Download unitree robot urdf files from [unitree_ros](https://github.com/unitreerobotics/unitree_ros)
+      ```
+      git clone https://github.com/unitreerobotics/unitree_ros.git
+      ```
+  - Config `UNITREE_ROS_DIR` in `source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py`.
+    ```bash
+    UNITREE_ROS_DIR = "</home/user/projects/unitree_ros/unitree_ros>"
+    ```
+  - [Optional]: change *robot_cfg.spawn* if you want to use urdf files
+
+
+
 - Verify that the environments are correctly installed by:
 
   - Listing the available tasks:
