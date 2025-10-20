@@ -6,7 +6,7 @@ if ! [[ -z "${CONDA_PREFIX}" ]]; then
     python_exe=${CONDA_PREFIX}/bin/python
 else
     echo "[Error] No conda environment activated. Please activate the conda environment first."
-    exit 1
+    # exit 1
 fi
 
 
@@ -59,37 +59,25 @@ _ut_setup_conda_env() {
 }
 
 # pass the arguments
-while [[ $# -gt 0 ]]; do
-    # read the key
-    case "$1" in
-        -i|--install)
-            git lfs install # ensure git lfs is installed
-            pip install -e ${UNITREE_RL_LAB_PATH}/source/unitree_rl_lab/
-            _ut_setup_conda_env
-            activate-global-python-argcomplete
-            break
-            ;;
-        -l|--list)
-            shift
-            ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/list_envs.py "$@"
-            # exit neatly
-            break
-            ;;
-        -p|--play)
-            shift
-            ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/play.py "$@"
-            # exit neatly
-            break
-            ;;
-        -t|--train)
-            shift
-            ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train.py --headless "$@"
-            # exit neatly
-            break
-            ;;
-        *) # unknown option
-            echo "[Error] Invalid argument provided: $1"
-            exit 1
-            ;;
-    esac
-done
+case "$1" in
+    -i|--install)
+        git lfs install # ensure git lfs is installed
+        pip install -e ${UNITREE_RL_LAB_PATH}/source/unitree_rl_lab/
+        _ut_setup_conda_env
+        activate-global-python-argcomplete
+        ;;
+    -l|--list)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/list_envs.py "$@"
+        ;;
+    -p|--play)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/play.py "$@"
+        ;;
+    -t|--train)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train.py --headless "$@"
+        ;;
+    *) # unknown option
+        ;;
+esac
