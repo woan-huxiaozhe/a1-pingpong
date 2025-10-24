@@ -155,9 +155,8 @@ def main():
 
     # reset environment
     obs = env.get_observations()
-    if version("rsl-rl-lib").startswith("2.3.") and isinstance(obs, tuple):
-        policy_ = runner.get_inference_policy(device=env.unwrapped.device)
-        policy = lambda x: policy_(x[0])  # noqa: E731
+    if version("rsl-rl-lib").startswith("2.3."):
+        obs, _ = env.get_observations()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
