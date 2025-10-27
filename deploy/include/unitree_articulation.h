@@ -20,6 +20,7 @@ public:
 
     void update() override
     {
+        std::lock_guard<std::mutex> lock(lowstate->mutex_);
         // base_angular_velocity
         for(int i(0); i<3; i++) {
             data.root_ang_vel_b[i] = lowstate->msg_.imu_state().gyroscope()[i];
