@@ -82,19 +82,13 @@ State_Mimic::State_Mimic(int state_mode, std::string state_string)
     this->registered_checks.emplace_back(
         std::make_pair(
             [&]()->bool{ return (env->episode_length * env->step_dt) > env->robot->data.motion_loader->duration; }, // time out
-            (int)FSMMode::Velocity
+            FSMStringMap.right.at("Velocity")
         )
     );
     this->registered_checks.emplace_back(
         std::make_pair(
             [&]()->bool{ return isaaclab::mdp::bad_orientation(env.get(), 1.0); }, // bad orientation
-            (int)FSMMode::Passive
-        )
-    );
-    this->registered_checks.emplace_back(
-        std::make_pair(
-            [&]()->bool{ return joy.RB.pressed && joy.X.on_pressed; }, // R1 + X
-            (int)FSMMode::Velocity
+            FSMStringMap.right.at("Passive")
         )
     );
 }
