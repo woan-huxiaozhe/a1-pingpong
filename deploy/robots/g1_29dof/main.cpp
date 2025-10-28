@@ -45,38 +45,8 @@ int main(int argc, char** argv)
     }
     
     // Initialize FSM
-    auto & joy = FSMState::lowstate->joystick;
-    auto fsm = std::make_unique<CtrlFSM>(new State_Passive(FSMMode::Passive));
-    fsm->states.back()->registered_checks.emplace_back(
-        std::make_pair(
-            [&]()->bool{ return joy.LT.pressed && joy.up.on_pressed; }, // L2 + Up
-            (int)FSMMode::FixStand
-        )
-    );
-    fsm->add(new State_FixStand(FSMMode::FixStand));
-    fsm->states.back()->registered_checks.emplace_back(
-        std::make_pair(
-            [&]()->bool{ return joy.RB.pressed && joy.X.on_pressed; }, // R1 + X
-            FSMMode::Velocity
-        )
-    );
-    fsm->add(new State_RLBase(FSMMode::Velocity, "Velocity"));
-    fsm->states.back()->registered_checks.emplace_back(
-        std::make_pair(
-            // L2(2s) + down, avoid mis-operation
-            [&]()->bool{ return joy.LT.pressed && joy.LT.pressed_time > 2.0 && joy.down.on_pressed; },
-            FSMMode::Mimic_Dance_102
-        )
-    );
-    fsm->states.back()->registered_checks.emplace_back(
-        std::make_pair(
-            // L2(2s) + left, avoid mis-operation
-            [&]()->bool{ return joy.LT.pressed && joy.LT.pressed_time > 2.0 && joy.left.on_pressed; },
-            FSMMode::Mimic_Gangnam_Style
-        )
-    );
-    fsm->add(new State_Mimic(FSMMode::Mimic_Dance_102, "Mimic_Dance_102"));
-    fsm->add(new State_Mimic(FSMMode::Mimic_Gangnam_Style, "Mimic_Gangnam_Style"));
+    auto fsm = std::make_unique<CtrlFSM>(param::config["FSM"]);
+    fsm->start();
 
     std::cout << "Press [L2 + Up] to enter FixStand mode.\n";
     std::cout << "And then press [R1 + X] to start controlling the robot.\n";

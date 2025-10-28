@@ -6,7 +6,6 @@
 State_RLBase::State_RLBase(int state_mode, std::string state_string)
 : FSMState(state_mode, state_string) 
 {
-    spdlog::info("Initializing State_{}...", state_string);
     auto cfg = param::config["FSM"][state_string];
     auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
 
@@ -19,7 +18,7 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
     this->registered_checks.emplace_back(
         std::make_pair(
             [&]()->bool{ return isaaclab::mdp::bad_orientation(env.get(), 1.0); },
-            (int)FSMMode::Passive
+            FSMStringMap.right.at("Passive")
         )
     );
 }

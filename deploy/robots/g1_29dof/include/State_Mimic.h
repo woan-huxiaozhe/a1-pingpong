@@ -25,3 +25,5 @@ private:
     std::thread policy_thread;
     bool policy_thread_running = false;
 };
+
+REGISTER_FSM(State_Mimic)
