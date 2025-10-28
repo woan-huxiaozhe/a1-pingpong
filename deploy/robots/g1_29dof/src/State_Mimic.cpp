@@ -60,7 +60,6 @@ REGISTER_OBSERVATION(motion_anchor_ori_b)
 State_Mimic::State_Mimic(int state_mode, std::string state_string)
 : FSMState(state_mode, state_string) 
 {
-    spdlog::info("Initializing State_{}...", state_string);
     auto cfg = param::config["FSM"][state_string];
     auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
 
