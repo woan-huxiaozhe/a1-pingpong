@@ -8,9 +8,9 @@ FSM:
       id: 3
       type: RLBase
 
-    # Mimic_Dance_102: # uncomment to enable
-    #   id: 101
-    #   type: Mimic
+    Mimic_Dance_102: # uncomment to enable
+      id: 101
+      type: Mimic
     Mimic_Gangnam_Style:
       id: 102
       type: Mimic
@@ -75,6 +75,8 @@ FSM:
     fps: 60
     motion_file: config/policy/mimic/dance_102/params/G1_Take_102.bvh_60hz.csv
     policy_dir: config/policy/mimic/dance_102/
+    time_start: 2.8
+    time_end: 24.0
   Mimic_Gangnam_Style:
     transitions: 
       Passive: LT + B.on_pressed
@@ -82,4 +84,6 @@ FSM:
     fps: 60
     motion_file: config/policy/mimic/gangnam_style/params/G1_gangnam_style_V01.bvh_60hz.csv
     policy_dir: config/policy/mimic/gangnam_style/
+    time_start: 5.2
+    time_end: 25.5
 

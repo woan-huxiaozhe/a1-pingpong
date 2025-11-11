@@ -39,8 +39,6 @@ struct ArticulationData
     std::vector<float> joint_ids_map;
 
     unitree::common::UnitreeJoystick* joystick = nullptr;
-
-    isaaclab::MotionLoader* motion_loader = nullptr;
 };
 
 class Articulation
