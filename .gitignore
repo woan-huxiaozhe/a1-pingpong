@@ -70,3 +70,6 @@ datasets
 *.mtl
 *.STL
 **/env.yaml
+
+# Mimic
+*.npz
