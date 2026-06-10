@@ -16,6 +16,21 @@ if TYPE_CHECKING:
 RACKET_OFFSET_Z = 0.0  # X1: Link_yb_paddle 本身就是球拍, 无偏移. (历史: G1 腕→球拍 16cm)
 
 
+def _ball_pos_w(env: ManagerBasedEnv, ball: RigidObject) -> torch.Tensor:
+    """Ball world position, delayed if a ball-obs delay term is active (plan A4).
+
+    BallObsDelayAction writes env._delayed_ball_pos each physics sub-step. When absent
+    (e.g. forehand task), falls back to the live ball state -> fully backward-compatible.
+    """
+    pos = getattr(env, "_delayed_ball_pos", None)
+    return pos if pos is not None else ball.data.root_pos_w
+
+
+def _ball_vel_w(env: ManagerBasedEnv, ball: RigidObject) -> torch.Tensor:
+    vel = getattr(env, "_delayed_ball_vel", None)
+    return vel if vel is not None else ball.data.root_lin_vel_w
+
+
 def upper_body_joint_pos_rel(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: UpperBodyMotionCommand = env.command_manager.get_term(command_name)
     ids = command.upper_body_joint_ids
@@ -38,13 +53,13 @@ def base_y_vel(env: ManagerBasedEnv) -> torch.Tensor:
 def ball_pos_relative(env: ManagerBasedEnv, ball_name: str) -> torch.Tensor:
     ball: RigidObject = env.scene[ball_name]
     robot_root = env.scene["robot"].data.root_pos_w
-    return (ball.data.root_pos_w - robot_root).clamp(-5.0, 5.0)
+    return (_ball_pos_w(env, ball) - robot_root).clamp(-5.0, 5.0)
 
 
 def ball_vel_relative(env: ManagerBasedEnv, ball_name: str) -> torch.Tensor:
     ball: RigidObject = env.scene[ball_name]
     robot_vel = env.scene["robot"].data.root_lin_vel_w
-    return (ball.data.root_lin_vel_w - robot_vel).clamp(-10.0, 10.0)
+    return (_ball_vel_w(env, ball) - robot_vel).clamp(-10.0, 10.0)
 
 
 def racket_pos(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
@@ -176,8 +191,8 @@ def ideal_hit_velocity(
 def ball_time_to_arrive(env: ManagerBasedEnv, ball_name: str, robot_x: float = 1.5, robot_side: int = 1) -> torch.Tensor:
     """Estimated time for ball to reach robot x position (1D, clamped to [0, 3])."""
     ball: RigidObject = env.scene[ball_name]
-    ball_x = ball.data.root_pos_w[:, 0] - env.scene.env_origins[:, 0]
-    ball_vx = ball.data.root_lin_vel_w[:, 0]
+    ball_x = _ball_pos_w(env, ball)[:, 0] - env.scene.env_origins[:, 0]
+    ball_vx = _ball_vel_w(env, ball)[:, 0]
     dx = robot_x - ball_x
     time = torch.where(
         ball_vx * robot_side > 0.1,
@@ -204,8 +219,8 @@ def ball_predicted_hit_point(
       - If ball is already rising after bounce (vz > 0, x on robot side): direct parabolic prediction
     """
     ball: RigidObject = env.scene[ball_name]
-    ball_pos = ball.data.root_pos_w[:, :3] - env.scene.env_origins
-    ball_vel = ball.data.root_lin_vel_w
+    ball_pos = _ball_pos_w(env, ball)[:, :3] - env.scene.env_origins
+    ball_vel = _ball_vel_w(env, ball)
 
     bx, by, bz = ball_pos[:, 0], ball_pos[:, 1], ball_pos[:, 2]
     vx, vy, vz = ball_vel[:, 0], ball_vel[:, 1], ball_vel[:, 2]
@@ -303,8 +318,8 @@ def ball_bounce_state(
     - urgency: 1.0 - normalized time to reach robot (0=far, 1=imminent)
     """
     ball: RigidObject = env.scene[ball_name]
-    ball_pos = ball.data.root_pos_w[:, :3] - env.scene.env_origins
-    ball_vel = ball.data.root_lin_vel_w
+    ball_pos = _ball_pos_w(env, ball)[:, :3] - env.scene.env_origins
+    ball_vel = _ball_vel_w(env, ball)
 
     bx, bz = ball_pos[:, 0], ball_pos[:, 2]
     vx, vz = ball_vel[:, 0], ball_vel[:, 2]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,20 @@ if TYPE_CHECKING:
 from unitree_rl_lab.tasks.table_tennis.mdp.commands import UpperBodyMotionCommand
 
 
+# Cache of loaded serve-state tables (plan A2), keyed by file path -> (M,6) tensor.
+_SERVE_STATES_CACHE: dict[str, torch.Tensor] = {}
+
+
+def _load_serve_states(path: str, device) -> torch.Tensor:
+    """Load (and cache) a serve_states.npz table: rows = [x,y,z,vx,vy,vz] in sim world."""
+    t = _SERVE_STATES_CACHE.get(path)
+    if t is None:
+        data = np.load(path)
+        t = torch.tensor(np.asarray(data["states"], dtype=np.float32), device=device)
+        _SERVE_STATES_CACHE[path] = t
+    return t
+
+
 def launch_ball(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -24,6 +39,7 @@ def launch_ball(
     vx_range: tuple[float, float] = (2.0, 4.0),
     vy_range: tuple[float, float] = (-0.5, 0.5),
     vz_range: tuple[float, float] = (0.0, 2.0),
+    serve_states_path: str | None = None,
 ):
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=env.device)
@@ -32,23 +48,54 @@ def launch_ball(
     num = len(env_ids)
 
     pos = torch.zeros(num, 3, device=env.device)
-    pos[:, 0] = sample_uniform(*x_range, (num,), device=env.device)
-    pos[:, 1] = sample_uniform(*y_range, (num,), device=env.device)
-    pos[:, 2] = sample_uniform(*z_range, (num,), device=env.device)
+    vel = torch.zeros(num, 3, device=env.device)
+    if serve_states_path is not None:
+        # plan A2: draw a calibrated serve (x,y,z,vx,vy,vz) from the table
+        table = _load_serve_states(serve_states_path, env.device)
+        idx = torch.randint(0, table.shape[0], (num,), device=env.device)
+        sampled = table[idx]
+        pos[:] = sampled[:, :3]
+        vel[:] = sampled[:, 3:6]
+    else:
+        pos[:, 0] = sample_uniform(*x_range, (num,), device=env.device)
+        pos[:, 1] = sample_uniform(*y_range, (num,), device=env.device)
+        pos[:, 2] = sample_uniform(*z_range, (num,), device=env.device)
+        vel[:, 0] = sample_uniform(*vx_range, (num,), device=env.device)
+        vel[:, 1] = sample_uniform(*vy_range, (num,), device=env.device)
+        vel[:, 2] = sample_uniform(*vz_range, (num,), device=env.device)
     pos += env.scene.env_origins[env_ids]
 
     quat = torch.zeros(num, 4, device=env.device)
     quat[:, 0] = 1.0
 
-    vel = torch.zeros(num, 3, device=env.device)
-    vel[:, 0] = sample_uniform(*vx_range, (num,), device=env.device)
-    vel[:, 1] = sample_uniform(*vy_range, (num,), device=env.device)
-    vel[:, 2] = sample_uniform(*vz_range, (num,), device=env.device)
-
     ang_vel = torch.zeros(num, 3, device=env.device)
 
     root_state = torch.cat([pos, quat, vel, ang_vel], dim=-1)
     ball.write_root_state_to_sim(root_state, env_ids=env_ids)
+
+
+def apply_air_drag(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    ball_cfg: SceneEntityCfg,
+    k: float = 0.125,
+):
+    """Quadratic air drag on the ball (plan A1): a = -k * |v| * v.
+
+    Implemented as a per-control-step semi-implicit velocity patch (v += a*dt) rather
+    than an external force: mass-independent, no world/local-frame ambiguity, and avoids
+    the deprecated set_external_force_and_torque (which warns on every call). Registered
+    as an interval event at the control rate so dt == env.step_dt.
+    """
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=env.device)
+
+    ball: RigidObject = env.scene[ball_cfg.name]
+    lin = ball.data.root_lin_vel_w[env_ids]
+    ang = ball.data.root_ang_vel_w[env_ids]
+    speed = torch.norm(lin, dim=-1, keepdim=True)
+    lin = lin - k * speed * lin * env.step_dt
+    ball.write_root_velocity_to_sim(torch.cat([lin, ang], dim=-1), env_ids=env_ids)
 
 
 def relaunch_ball_if_out(
@@ -65,6 +112,7 @@ def relaunch_ball_if_out(
     vx_range: tuple[float, float] = (1.5, 3.0),
     vy_range: tuple[float, float] = (-0.3, 0.3),
     vz_range: tuple[float, float] = (-4.0, -2.0),
+    serve_states_path: str | None = None,
 ):
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=env.device)
@@ -85,7 +133,8 @@ def relaunch_ball_if_out(
     command: UpperBodyMotionCommand = env.command_manager.get_term("motion")
     command.ball_was_hit[out_ids] = False
     command.swing_done[out_ids] = False
-    launch_ball(env, out_ids, ball_cfg, x_range, y_range, z_range, vx_range, vy_range, vz_range)
+    launch_ball(env, out_ids, ball_cfg, x_range, y_range, z_range, vx_range, vy_range, vz_range,
+                serve_states_path=serve_states_path)
 
     # 重新对齐 motion phase: 让新球的过网时刻对应 phase=0, 球到达 robot 时对应 hit_phase
     duration = command.motion.motions[0]["duration"]

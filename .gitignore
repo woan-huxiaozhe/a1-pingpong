@@ -78,3 +78,9 @@ datasets
 
 # Mimic
 *.npz
+
+# Reference papers (keep out of repo, too large)
+docs/*.pdf
+
+# Patch/merge backup artifacts
+*.orig

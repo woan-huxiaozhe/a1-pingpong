@@ -65,6 +65,13 @@ parser.add_argument(
          "frame is the designated contact pose. Lets contact land on a higher / "
          "more-forward paddle frame than the cfg default (0.475).",
 )
+parser.add_argument(
+    "--max_trials",
+    type=int,
+    default=None,
+    help="Stop after this many serves (trials). Lets the script run WITHOUT --video "
+         "(much faster, no render) and still terminate + print the aggregate diagnosis.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 if args_cli.video:
@@ -106,22 +113,26 @@ def main():
             env_cfg.events.randomize_effort = None
 
     # Override lift column height
-    env_cfg.scene.robot.init_state.joint_pos["joint_lift"] = -0.28
+    # NOTE: lines below are FOREHAND-specific dev scaffolding (A1-TableTennis whip motion).
+    # Skip them for the backhand task so it uses its own env_cfg (lift / ready pose /
+    # hit_phase / arrive_time live in robots/a1/backhand/env_cfg.py).
+    if "Backhand" not in args_cli.task:
+        env_cfg.scene.robot.init_state.joint_pos["joint_lift"] = -0.28
 
-    # Match from_csv init: all joints from real policy episode 0
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_1"] = 1.769
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_2"] = -0.762
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_3"] = -1.863
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_4"] = 1.445
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_5"] = 0.206
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_6"] = -0.827
-    env_cfg.scene.robot.init_state.joint_pos["joint_yb_7"] = 1.043
+        # Match from_csv init: all joints from real policy episode 0
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_1"] = 1.769
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_2"] = -0.762
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_3"] = -1.863
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_4"] = 1.445
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_5"] = 0.206
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_6"] = -0.827
+        env_cfg.scene.robot.init_state.joint_pos["joint_yb_7"] = 1.043
 
-    # Phase alignment for v56c motion (105 frames, hit_frame=51)
-    env_cfg.commands.motion.hit_phase = 0.486
-    env_cfg.commands.motion.hit_phase_noise = 0.0
-    env_cfg.commands.motion.ball_arrive_time_est = 0.65
-    env_cfg.commands.motion.ball_arrive_time_noise = 0.0
+        # Phase alignment for v56c motion (105 frames, hit_frame=51)
+        env_cfg.commands.motion.hit_phase = 0.486
+        env_cfg.commands.motion.hit_phase_noise = 0.0
+        env_cfg.commands.motion.ball_arrive_time_est = 0.65
+        env_cfg.commands.motion.ball_arrive_time_noise = 0.0
 
     if args_cli.npz is not None:
         npz_abs = os.path.abspath(args_cli.npz)
@@ -261,6 +272,9 @@ def main():
     min_gap_joints = None  # (actual[7], target[7]) at the closest-approach (contact) step
     steps_in_trial = 0
     _debug_printed = False
+    min_gap_phase = 0.0
+    min_gap_mid = -1
+    trial_stats = []  # per-trial: (min_gap, phase@min_gap, bx,by,bz, rx,ry,rz, motion_id)
 
     # Torque logging
     torque_log = []  # list of (step, [torque_yb1..yb7])
@@ -275,6 +289,16 @@ def main():
     while simulation_app.is_running():
         with torch.inference_mode():
             obs, _, _, _, _ = env.step(zero_action)
+
+        # phase of the reference swing this step (0..1); hit_phase target = cfg hit_phase
+        try:
+            phase_val = float(env.unwrapped.command_manager.get_term("motion").phase[0])
+        except Exception:
+            phase_val = -1.0
+        try:
+            mid_val = int(env.unwrapped.command_manager.get_term("motion").motion_ids[0])
+        except Exception:
+            mid_val = -1
 
         # Record torque for right arm joints
         jids = robot.find_joints(["joint_yb_1","joint_yb_2","joint_yb_3","joint_yb_4","joint_yb_5","joint_yb_6","joint_yb_7"])[0]
@@ -335,6 +359,8 @@ def main():
             fn_z = math_utils.quat_apply(racket_quat_w.unsqueeze(0), local_z)[0].cpu().numpy()
             min_gap_face_normal = f"X={fn_x} Y={fn_y} Z={fn_z}"
             min_gap_joints = (pos.cpu().numpy().copy(), tgt.cpu().numpy().copy())
+            min_gap_phase = phase_val
+            min_gap_mid = mid_val
 
         bx, bz = float(ball_pos_local[0]), float(ball_pos_local[2])
 
@@ -356,6 +382,14 @@ def main():
             print(f"  min_gap={min_gap:.3f}m at step {min_gap_step}  "
                   f"racket={min_gap_racket}  ball={min_gap_ball}"
                   f"  face_normal={min_gap_face_normal}")
+            if min_gap_racket is not None and min_gap_ball is not None:
+                _off = min_gap_ball - min_gap_racket
+                print(f"  phase@min_gap={min_gap_phase:.3f} (hit_phase target=0.4643)  "
+                      f"offset(ball-racket) dx={_off[0]:+.3f} dy={_off[1]:+.3f} dz={_off[2]:+.3f}")
+                trial_stats.append((float(min_gap), float(min_gap_phase),
+                                    float(min_gap_ball[0]), float(min_gap_ball[1]), float(min_gap_ball[2]),
+                                    float(min_gap_racket[0]), float(min_gap_racket[1]), float(min_gap_racket[2]),
+                                    float(min_gap_mid)))
             cleared_this_trial = False
             bounced_own_table = False
             ball_was_hit_back = False
@@ -363,6 +397,8 @@ def main():
             prev_bz = None
             min_gap = 999.0
             steps_in_trial = 0
+            if args_cli.max_trials and num_trials >= args_cli.max_trials:
+                break
 
         # Detect ball hit: ball starts moving away from robot (was reflected by paddle)
         if not ball_was_hit_back and prev_bx is not None and (bx - prev_bx) * robot_side < -0.01 and bx * robot_side > 0.5:
@@ -386,6 +422,41 @@ def main():
             timestep += 1
             if timestep >= args_cli.video_length:
                 break
+
+    # ===== PURE-REF TIMING/GEOMETRY DIAGNOSIS (aggregate over trials) =====
+    if trial_stats:
+        import numpy as _np
+        arr = _np.array(trial_stats)  # cols: gap,phase,bx,by,bz,rx,ry,rz
+        med = _np.median(arr, axis=0)
+        print("\n========== PURE-REF TIMING/GEOMETRY DIAGNOSIS ==========")
+        print(f"trials = {len(trial_stats)}")
+        print(f"median min_gap        = {med[0]:.3f} m   (contact needs <~0.06)")
+        print(f"median phase@min_gap  = {med[1]:.3f}      (hit_phase target = 0.4643)")
+        print(f"median ball  @min_gap = x={med[2]:+.3f} y={med[3]:+.3f} z={med[4]:+.3f}")
+        print(f"median racket@min_gap = x={med[5]:+.3f} y={med[6]:+.3f} z={med[7]:+.3f}")
+        print(f"median offset(ball-racket) dx={med[2]-med[5]:+.3f} dy={med[3]-med[6]:+.3f} dz={med[4]-med[7]:+.3f}")
+        print("axis read: |dz| big -> lift/reach height; |dx| big -> arrive_time/hit_phase timing;")
+        print("           |dy| big -> lateral; phase far from 0.4643 -> swing mistimed vs ball arrival.")
+        if arr.shape[1] >= 9:
+            mids = arr[:, 8].astype(int)
+            print("\n----- per-bucket breakdown (motion_id 0=middle 1=left 2=right) -----")
+            for b, name in [(0, "middle"), (1, "left  "), (2, "right ")]:
+                m = mids == b
+                if not m.any():
+                    print(f"  id{b} {name}: 0 trials  (NEVER SELECTED)")
+                    continue
+                sub = arr[m]
+                sdy = _np.median(sub[:, 3] - sub[:, 6])
+                sdz = _np.median(sub[:, 4] - sub[:, 7])
+                sby = _np.median(sub[:, 3])
+                sgap = _np.median(sub[:, 0])
+                print(f"  id{b} {name}: {m.sum():3d} trials ({m.mean()*100:4.0f}%)  "
+                      f"median ball_y={sby:+.3f}  signed dy={sdy:+.3f}  dz={sdz:+.3f}  min_gap={sgap:.3f}")
+            print("\nread: this is PURE-REF (residual=0, phase_speed=1.0) = the references' INTRINSIC")
+            print("      placement. per-bucket dy here ~+0.10 -> that REFERENCE is miscalibrated (fix")
+            print("      yb_2 offset, no retrain); per-bucket dy ~0 here but trained-probe +0.10 -> the")
+            print("      trained policy still WANDERS in that bucket (tighten residual, not refs).")
+        print("=========================================================")
 
     # Save torque log
     torque_out = os.path.join(os.path.abspath(args_cli.output_dir), "torques.txt")

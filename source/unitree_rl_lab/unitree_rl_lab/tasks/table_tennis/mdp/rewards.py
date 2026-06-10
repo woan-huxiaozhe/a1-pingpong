@@ -77,14 +77,22 @@ def base_y_tracking_exp(
 
 
 def racket_ball_proximity(
-    env: ManagerBasedRLEnv, ball_name: str, racket_body_name: str, sigma: float
+    env: ManagerBasedRLEnv, ball_name: str, racket_body_name: str, sigma: float,
+    command_name: str = "motion", gate_pre_contact: bool = False,
 ) -> torch.Tensor:
     ball: RigidObject = env.scene[ball_name]
     robot = env.scene["robot"]
     racket_pos = _racket_world_pos(robot, racket_body_name)
     ball_pos = ball.data.root_pos_w[:, :3]
     error = torch.sum((racket_pos - ball_pos) ** 2, dim=-1)
-    return torch.exp(-sigma * error)
+    proximity = torch.exp(-sigma * error)
+    # gate_pre_contact (backhand-only, 2026-06-08): proximity 在击球前引导接近, 击球后清零 ——
+    # 否则球被打走 dist↑ -> proximity↓ 反而惩罚 follow-through, 形成 hover 局部最优
+    # (诊断: 失败 run 里 proximity=0.102 是最大正奖, 击球链≈0.001, 81% 漏球). 默认 False = forehand 不变.
+    if gate_pre_contact:
+        command: UpperBodyMotionCommand = env.command_manager.get_term(command_name)
+        proximity = proximity * (~command.ball_was_hit).float()
+    return proximity
 
 
 def ball_hit_reward(
@@ -92,10 +100,16 @@ def ball_hit_reward(
     sensor_cfg: SceneEntityCfg,
     ball_name: str,
     proximity_threshold: float = 0.15,
+    use_max_force: bool = False,
 ) -> torch.Tensor:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
-    force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
+    # use_max_force: 取整个 history 的最大力 (对齐 track_ball_hit) —— 乒乓接触仅 1-2 substep,
+    # 瞬时帧 net_forces[:,0] 常漏判 -> 接触奖励≈0 (无梯度). 默认 False 保持 forehand 行为不变.
+    if use_max_force:
+        force_magnitude = torch.norm(net_forces, dim=-1).max(dim=1).values.squeeze(-1)
+    else:
+        force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
 
     ball: RigidObject = env.scene[ball_name]
     robot = env.scene["robot"]
@@ -128,11 +142,16 @@ def ball_hit_toward_opponent(
     optimal_vx: float = -3.0,
     sigma: float = 1.5,
     robot_side: int = 1,
+    use_max_force: bool = False,
 ) -> torch.Tensor:
     """Bell-curve direction reward: peaks when ball vx matches optimal return velocity."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
-    force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
+    # use_max_force: history 最大力 (对齐 track_ball_hit), 默认 False = forehand 行为不变.
+    if use_max_force:
+        force_magnitude = torch.norm(net_forces, dim=-1).max(dim=1).values.squeeze(-1)
+    else:
+        force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
 
     ball: RigidObject = env.scene[ball_name]
     racket_pos = _racket_pos_from_sensor(env, sensor_cfg)
@@ -154,11 +173,16 @@ def ball_speed_after_hit(
     proximity_threshold: float = 0.25,
     optimal_speed: float = 3.5,
     sigma: float = 1.5,
+    use_max_force: bool = False,
 ) -> torch.Tensor:
     """Bell-curve reward: peaks at optimal_speed, decays for too slow or too fast."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
-    force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
+    # use_max_force: history 最大力 (对齐 track_ball_hit), 默认 False = forehand 行为不变.
+    if use_max_force:
+        force_magnitude = torch.norm(net_forces, dim=-1).max(dim=1).values.squeeze(-1)
+    else:
+        force_magnitude = torch.norm(net_forces[:, 0], dim=-1).squeeze(-1)
 
     ball: RigidObject = env.scene[ball_name]
     racket_pos = _racket_pos_from_sensor(env, sensor_cfg)

@@ -51,3 +51,30 @@ class A1TableTennisPPORunnerCfg(TableTennisPPORunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class A1TableTennisBackhandPPORunnerCfg(A1TableTennisPPORunnerCfg):
+    """A1 反手 100Hz 配套 (plan A0/§6): 控制率翻倍 50->100Hz, 为保持时域行为:
+    gamma 0.99 -> 0.995 (有效时域 ~1s 维持), num_steps_per_env 24 -> 48 (rollout ~0.48s 维持).
+
+    沿用 forehand 的 policy=RslRlPpoActorCriticCfg 旧写法; rsl-rl 5.x 下由 train.py 的
+    handle_deprecated_rsl_rl_cfg() 在运行时把 policy 转成 actor/critic + distribution_cfg.
+    """
+
+    experiment_name = "a1_tabletennis_backhand"
+    num_steps_per_env = 48
+    algorithm = RslRlPpoAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.005,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.995,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+    )

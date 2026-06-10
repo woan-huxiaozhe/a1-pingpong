@@ -47,3 +47,19 @@ class DelayedObsEnv(ManagerBasedRLEnv):
         if self._obs_delay_max > 0:
             obs_buf["policy"] = self._obs_delay_buffer.compute(obs_buf["policy"])
         return obs_buf, rew, term, trunc, extras
+
+
+class BackhandDelayedEnv(ManagerBasedRLEnv):
+    """Backhand env (plan A4): ball-observation delay only, at physics sub-step granularity.
+
+    Unlike DelayedObsEnv (which delays the whole policy observation), the backhand delays
+    *only* the ball-derived observations. That delay is produced by the zero-dim
+    BallObsDelayAction term (the per-sub-step hook), which writes a delayed ball snapshot
+    onto this env. This class just guarantees the snapshot attributes exist with a safe
+    default so the ball-obs functions fall back to the live state if the term is absent.
+    """
+
+    def __init__(self, cfg, render_mode=None, **kwargs):
+        self._delayed_ball_pos = None
+        self._delayed_ball_vel = None
+        super().__init__(cfg, render_mode, **kwargs)
