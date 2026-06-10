@@ -1,0 +1,107 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/__init__.py
+  s_79259e95011668::t_faf2138e19e313 5-11,13-17
+scripts/sac_table_tennis/play.py
+  s_79259e95011668::t_c88f91e07d688e 11,28
+  s_79259e95011668::t_08809662a1e55d 21
+  s_79259e95011668::t_521d970ea71d46 12,17,51-57,67-70
+  s_79259e95011668::t_05eaa9626b57b2 1-5,7-10,13-16,20,22-27,29-37,48-50,61-66,71-74,77-94
+  s_79259e95011668::t_572d0c4bdfd9d3 6,18-19,58-60,75-76
+  s_79259e95011668::t_18600c4fb4df2d 38-47
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/env_cfg.py
+  s_79259e95011668::t_0b551147f718bb 113-126
+  s_79259e95011668::t_a9938494bc5340 170
+  s_79259e95011668::t_f0644dad4cb153 177
+  s_79259e95011668::t_954822b71649e6 28
+  s_79259e95011668::t_6267092a8a0543 206-208
+  s_79259e95011668::t_1de90514ae6240 25-26,71-73
+  s_79259e95011668::t_5e0d9761368d12 13,29-30,32,34-35,37,53,143-151
+  s_79259e95011668::t_463efb2a047052 101-112
+  s_79259e95011668::t_e8328579e1b9b4 1-12,14-20,22-24,31,33,36,38-52,54-70,74-100,127-142,152-169,171-176,178-205,209-216
+  s_79259e95011668::t_3e88b464e82100 21
+  h_c9d7340f891f95 27
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/rewards.py
+  s_79259e95011668::t_ac83c9c78f1f22 77-104
+  s_79259e95011668::t_b96fac6beb5527 1-44,65-76
+  s_79259e95011668::t_16310dcb378834 45-64
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/observations.py
+  s_79259e95011668::t_08138c78760003 62-95
+  s_79259e95011668::t_703fd3648cc853 1-61,96-114
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/runtime.py
+  s_79259e95011668::t_bbba979b1e122f 41,49-52
+  s_79259e95011668::t_a0f306ad3494ef 1-40,42-48,53-54
+scripts/sac_table_tennis/probe_ready_pose.py
+  s_79259e95011668::t_08c6892077b8d4 56-57,76,95,97
+  s_79259e95011668::t_8a7e0c2fd2c8c7 17,55,58-59,61,73,75,85,89-94,96
+  s_79259e95011668::t_633cea15c6b3a3 1-16,18-54,60,62-72,74,77-84,86-88,98-113
+docs/sac_table_tennis_architecture.md
+  s_79259e95011668::t_0b5a0d922a8306 495-496
+  s_79259e95011668::t_f5d184dd4ac4e4 1-66,68,71,73-75,77,89-168,170,173-180,193-199,201-211,214-223,225-240,242-252,254-494,499-532,534-535,545-553
+  s_79259e95011668::t_88d9c2af3feff6 84-85,533,536-544
+  s_79259e95011668::t_fdafea81300dbc 497-498
+  s_79259e95011668::t_d1cb7a5b44a8f5 200
+  s_79259e95011668::t_27d8d4611ff014 67,69-70,72,76,78-80,83,86-88,169,171-172,181-192
+  s_79259e95011668::t_8029bfb46f2904 212-213,224,241,253
+  s_79259e95011668::t_c95b739797c2f8 81-82
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/control.py
+  s_79259e95011668::t_0ca2c37b10d904 1-32
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/actions.py
+  s_79259e95011668::t_d795032480dc23 1-37,44-72,75-104,106
+  s_79259e95011668::t_64675fb1802bcf 38-43,73-74,105
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/terminations.py
+  s_79259e95011668::t_b69449158efad8 1-22,29-31,37-46,50-53
+  s_79259e95011668::t_a886ec2c55dc9b 23-28
+  s_79259e95011668::t_0fd368342fef5c 32-36,47-49,54-56
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/events.py
+  s_79259e95011668::t_fcf35a247d060e 1-5,7-27,29-30,39-75,80-89,135-167,169-176,178-192,195-196,208-245,259-282,284,289-297
+  s_79259e95011668::t_2a860b5c416984 6,90-134
+  s_79259e95011668::t_4e2704da0c48aa 28,31-38,76-79,177,193-194,197-207,283,285-288
+  s_79259e95011668::t_a1ba1e259607a4 168,246-258
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/replay.py
+  s_79259e95011668::t_04012bfdc4b2ae 1-252,254-260,265-361
+  s_79259e95011668::t_47a1ddf1777810 253,261-264
+tests/test_sac_table_tennis_pipeline.py
+  s_79259e95011668::t_7c6c3ac63d12b8 183,185
+  s_79259e95011668::t_08c873e20189f9 1-58,78-158
+  s_79259e95011668::t_95c0c33740ebf7 159-182,184
+  s_79259e95011668::t_261281e2fc9110 59-77
+scripts/list_envs.py
+  s_79259e95011668::t_6fbbd9350967af 61
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/__init__.py
+  s_79259e95011668::t_e4610e8e2ae7a2 1-11
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/sac.py
+  s_79259e95011668::t_1c929b41e5fe00 1-2,4-23,25-101,103-127,129-178,180-192,199-243,245-248
+  s_79259e95011668::t_3af25ba4b9491b 3
+  s_79259e95011668::t_4bc279b9756188 24,102,128,179,193-198,244
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/__init__.py
+  s_79259e95011668::t_db4e0241fca487 1-9
+scripts/sac_table_tennis/train.py
+  s_79259e95011668::t_f1440da3794ab9 15,36
+  s_79259e95011668::t_07ed66d565b3d4 54,132,138-143
+  s_79259e95011668::t_376cfded9edb14 56-59,61,151-153,235-239,245-249,266-268
+  s_79259e95011668::t_960aa3c9ee1a23 1-5,7-8,10-14,16-28,30-35,37-40,42-53,55,60,62-68,133-137,144-150,154-178,180-208,210-234,240-242,250-253,255-265,269-275
+  s_79259e95011668::t_35054f268f2edd 6,9,41,69-131,179,209,243-244,254
+  s_79259e95011668::t_a4421a3d77a48d 29
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/event_tags.py
+  s_79259e95011668::t_7f38df10c62124 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "2f1a96395049d5afc4b83bf49ee03896dcd1166e",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_79259e95011668": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eafaa-70a2-7e82-85a1-e7d7cc47c865",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
