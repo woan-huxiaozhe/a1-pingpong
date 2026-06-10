@@ -1,0 +1,130 @@
+scripts/rsl_rl/play_pure_ref.py
+  s_2a8798df592349::t_87e985abe1ee36 276-277
+  s_f40c7fa44d441f::t_2bc5709090689c 362
+  s_f40c7fa44d441f::t_b8c8c148d60528 385-390
+  s_f40c7fa44d441f::t_5cea31665e2513 275
+  s_f40c7fa44d441f::t_002544036ea082 116-135
+  s_2a8798df592349::t_62da3fb7262648 391-392
+  s_f40c7fa44d441f::t_d6887da8f2250c 400-401
+  s_2a8798df592349::t_9177bfff621830 440-458
+  s_f40c7fa44d441f::t_6b7e30bdde3fe9 68-74
+  s_2a8798df592349::t_8cd0f5aa89c926 298-301
+  s_2a8798df592349::t_026de6d4d0b3f0 363
+  s_f40c7fa44d441f::t_872a70f9fd49b2 426-439,459-460
+  s_f40c7fa44d441f::t_88142cab894258 293-297,302
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/delayed_env.py
+  s_f40c7fa44d441f::t_5910accb51c0b6 50-65
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/mdp/actions.py
+  s_f40c7fa44d441f::t_ca7e5e9afc2f48 48,57-68
+  s_f40c7fa44d441f::t_a07fc4310ee3da 8
+  s_f40c7fa44d441f::t_eab52f3cd7acd6 86-90,102-110,122-126
+  s_f40c7fa44d441f::t_a9e67718a9a282 294-298
+  s_f40c7fa44d441f::t_7469e4c4957403 316-392
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/agents/rsl_rl_ppo_cfg.py
+  s_f40c7fa44d441f::t_34fdcbd566b4f4 54-56,63-64,67-80
+  s_f40c7fa44d441f::t_e41faa995f17f7 57-59,61-62,66
+  s_f40c7fa44d441f::t_d88f3ce2461783 60,65
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/create_backhand_ref.py
+  s_f40c7fa44d441f::t_2d9390bb2e1abd 1-187
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/create_serve_states.py
+  s_f40c7fa44d441f::t_da12e6479a7dcd 40-48,50
+  s_f40c7fa44d441f::t_2d6a7207b87196 120,122-126,138-143,154,157
+  s_f40c7fa44d441f::t_6156be9f5c9bc6 223,225,229-231,233-235,240,242-243,247-248,251,255-256
+  s_f40c7fa44d441f::t_ff621960626e5c 1-39,49,51-119,121,127-137,144-153,155-156,158-222,224,226-228,232,236-239,241,244-246,249-250,252-254,257-271
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/mdp/observations.py
+  s_f40c7fa44d441f::t_7a96a601fa4966 321-322
+  s_f40c7fa44d441f::t_afb763b93e4bd3 56,62
+  s_f40c7fa44d441f::t_1296c31dff9b42 19-33
+  s_f40c7fa44d441f::t_430fe2fb103333 222-223
+  s_f40c7fa44d441f::t_a520b6508d8e4d 194-195
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/__init__.py
+  s_f40c7fa44d441f::t_5841ddad0d8423 1-12
+scripts/rsl_rl/train.py
+  s_f40c7fa44d441f::t_98395501bb7586 130-133
+  s_f40c7fa44d441f::t_4ee8e770f1958a 107
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/mdp/rewards.py
+  s_f40c7fa44d441f::t_8b6178af707767 176,181-185
+  s_f40c7fa44d441f::t_aa0915138e0a87 145,150-154
+  s_2a8798df592349::t_6c490406928470 80-81,88-95
+  s_f40c7fa44d441f::t_f2ecddfa895fe5 103,107-112
+docs/superpowers/2026-06-08-backhand-finetune-progress.md
+  s_2a8798df592349::t_8a20f1afd92ecd 248-282
+  s_2a8798df592349::t_0321c6cc1be3e4 202-225
+  s_f40c7fa44d441f::t_9beace988b6611 1-125
+  s_2a8798df592349::t_a01911aaa9adb7 126-182
+  s_2a8798df592349::t_49be39f153a54d 183-201
+  s_2a8798df592349::t_e4d0d2090d1987 283-339
+  s_2a8798df592349::t_8e4ec689042f19 340-386
+  s_2a8798df592349::t_45dde72998e037 226-247
+  s_2a8798df592349::t_e6dd527ae952e9 387-425
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/create_backhand_variants.py
+  s_2a8798df592349::t_a7137976cb905a 1-86
+.gitignore
+  s_1cdad1bd251d8e::t_492609b66f5586 81-86
+scripts/rsl_rl/_fk_jac_probe.py
+  s_f40c7fa44d441f::t_6a41df583f96d4 1-5,8,13-14,16-18,23-25,27-28,31-32,34-92
+  s_f40c7fa44d441f::t_af0209e132b199 6-7,9-12,15,19-22,26,29-30,33
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/env_cfg.py
+  s_2a8798df592349::t_7b7af6cbdea462 44-52
+  s_f40c7fa44d441f::t_e7acd7d1cd6ca8 66-96
+  s_f40c7fa44d441f::t_5e9075d13d2c92 111-114
+  s_2a8798df592349::t_a104b40041372d 168-205
+  s_2a8798df592349::t_b08f2ec494264a 212
+  s_f40c7fa44d441f::t_7e1f53f332350f 313-317
+  s_2a8798df592349::t_5f6dca4446a46c 144-165
+  s_f40c7fa44d441f::t_db1c4c6df27fd9 135-143
+  s_f40c7fa44d441f::t_8b1ceb46dc24d5 59-61,63
+  s_f40c7fa44d441f::t_e4c67cf18feb60 1-22,24-43,53-58,64-65,206-211,213-218,221-233,239-246,249-293,295-312,318-343
+  s_2a8798df592349::t_bbb404f0807820 23
+  s_2a8798df592349::t_0b9ea5efbbdb1d 294
+  h_c9d7340f891f95 62
+  s_2a8798df592349::t_208261a92fa80b 234-238,247-248
+  s_2a8798df592349::t_bc5a37016db0c4 116-122
+  s_2a8798df592349::t_7fc3403fe7079a 219-220
+  s_f40c7fa44d441f::t_5166a74a4df816 97-110,115,123-134,166-167
+scripts/rsl_rl/probe_policy_geom.py
+  s_2a8798df592349::t_b227a07c8e4076 1-53,55-69,72-110,112,114,117-123,126-127,129-138,140-145,147-149,152-159,161-163,165-175,193-200
+  s_2a8798df592349::t_614edba8cf8f47 70-71
+  s_2a8798df592349::t_9655ac1bbbfc5f 54
+  s_2a8798df592349::t_7b45c671c1a2b3 111,113,115-116,124-125,128,139,146,150-151,160,164,176-192
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/mdp/events.py
+  s_f40c7fa44d441f::t_6e3e0728a9286d 3,18-31,42,51-65,77-100,115
+  s_f40c7fa44d441f::t_0dd697d470ab99 136-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "b74e488bca5f877a017eb66105b2e4e1f5daae70",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_1cdad1bd251d8e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5fd534ae-8a27-4e80-b17c-1884449ccd5b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_2a8798df592349": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "095a5c22-1a6f-40f8-ac98-c28b9b30bbe5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_f40c7fa44d441f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "292874a9-15cd-49ed-bd0b-bc5d4dcb81b2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
