@@ -12,7 +12,13 @@ from unitree_rl_lab.tasks.table_tennis.mdp.observations import ball_predicted_hi
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
-RACKET_OFFSET_Z = 0.0
+# Paddle blade geometric center, measured from the Link_yb_paddle body origin in the
+# link-local frame (a1.usd: blade plate 0.15 x 0.02 x 0.25, subtree center at local
+# +Z 0.045). The body origin sits ~0.045 m below the blade center (toward the lower
+# edge / handle side), which is why a zero offset rewards "handle" contact. Shifting
+# the racket reference point to +0.045 makes proximity / approach / hit all radiate
+# from the true paddle center. Face normal is local +Y, so the in-plane offset is +Z.
+RACKET_OFFSET_Z = 0.045
 
 
 def _racket_body_state(env: ManagerBasedEnv, racket_body_name: str):
@@ -30,6 +36,19 @@ def _racket_body_state(env: ManagerBasedEnv, racket_body_name: str):
     return center, center_vel, quat
 
 
+def _racket_body_lin_vel(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
+    """Translational (body-origin) linear velocity of the paddle, *without* the
+    ``ang_vel x offset`` term that ``_racket_body_state`` adds for the blade center.
+
+    Used by the swing-speed reward so a fast wrist spin (which produces large blade-center
+    velocity through the 0.045 m offset moment arm) cannot farm the reward without the arm
+    actually translating the paddle forward.
+    """
+    robot = env.scene["robot"]
+    body_idx = robot.body_names.index(racket_body_name)
+    return robot.data.body_lin_vel_w[:, body_idx]
+
+
 def racket_pos(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
     pos, _, _ = _racket_body_state(env, racket_body_name)
     return pos - env.scene.env_origins
@@ -40,11 +59,36 @@ def racket_vel(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
     return vel.clamp(-10.0, 10.0)
 
 
+def racket_ang_vel(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
+    robot = env.scene["robot"]
+    body_idx = robot.body_names.index(racket_body_name)
+    return robot.data.body_ang_vel_w[:, body_idx].clamp(-20.0, 20.0)
+
+
 def racket_normal(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
     _, _, quat = _racket_body_state(env, racket_body_name)
     local_normal = torch.zeros(quat.shape[0], 3, device=quat.device)
     local_normal[:, 1] = 1.0
     return quat_rotate(quat, local_normal)
+
+
+def racket_axes(env: ManagerBasedEnv, racket_body_name: str) -> torch.Tensor:
+    _, _, quat = _racket_body_state(env, racket_body_name)
+    local_x = torch.zeros(quat.shape[0], 3, device=quat.device, dtype=quat.dtype)
+    local_y = torch.zeros_like(local_x)
+    local_z = torch.zeros_like(local_x)
+    local_x[:, 0] = 1.0
+    local_y[:, 1] = 1.0
+    local_z[:, 2] = 1.0
+    axis_x = quat_rotate(quat, local_x)
+    axis_y = quat_rotate(quat, local_y)
+    axis_z = quat_rotate(quat, local_z)
+    return torch.cat([axis_x, axis_y, axis_z], dim=-1)
+
+
+def ball_vel_w(env: ManagerBasedEnv, ball_name: str) -> torch.Tensor:
+    ball: RigidObject = env.scene[ball_name]
+    return ball.data.root_lin_vel_w.clamp(-15.0, 15.0)
 
 
 def ball_pos_relative_to_racket(env: ManagerBasedEnv, ball_name: str, racket_body_name: str) -> torch.Tensor:

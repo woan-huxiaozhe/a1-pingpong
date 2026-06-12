@@ -50,6 +50,10 @@ OPP_TABLE_X = (min(0.0, -1.37 * ROBOT_SIDE), max(0.0, -1.37 * ROBOT_SIDE))
 TARGET_X = -0.7 * ROBOT_SIDE
 OPTIMAL_VX = -3.0 * ROBOT_SIDE
 
+# 对方半台中心 x (落点目标) 与台面高度. 供 SAC 任务的发射方向/落点奖励共用同一目标点.
+OPP_TABLE_CENTER_X = 0.5 * (OPP_TABLE_X[0] + OPP_TABLE_X[1])  # ≈ +0.685 (ROBOT_SIDE=-1)
+TABLE_Z = 0.76  # 与 events.update_sac_episode_state 的 table_z 默认值一致
+
 RIGHT_ARM_JOINT_NAMES = [
     "joint_yb_1",
     "joint_yb_2",

@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
+from isaaclab.utils.math import quat_rotate
 
 from unitree_rl_lab.tasks.table_tennis.mdp.events import launch_ball
 from unitree_rl_lab.tasks.table_tennis_sac.event_tags import EVENT_TO_BIT
+from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import RACKET_OFFSET_Z
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -28,6 +30,8 @@ def _ensure_tracker(env: ManagerBasedEnv):
         "_sac_final_min_dist": (torch.float32, float("inf")),
         "_sac_landing_y": (torch.float32, float("nan")),
         "_sac_final_landing_y": (torch.float32, float("nan")),
+        "_sac_landing_x": (torch.float32, float("nan")),
+        "_sac_final_landing_x": (torch.float32, float("nan")),
         "_sac_hit_outgoing_speed": (torch.float32, float("nan")),
         "_sac_hit_up_speed": (torch.float32, float("nan")),
         "_sac_post_hit_max_outgoing_speed": (torch.float32, float("-inf")),
@@ -73,6 +77,7 @@ def reset_sac_episode_state(env: ManagerBasedEnv, env_ids: torch.Tensor | None =
         getattr(env, name)[ids] = False
     env._sac_min_dist[ids] = float("inf")
     env._sac_landing_y[ids] = float("nan")
+    env._sac_landing_x[ids] = float("nan")
     env._sac_hit_outgoing_speed[ids] = float("nan")
     env._sac_hit_up_speed[ids] = float("nan")
     env._sac_post_hit_max_outgoing_speed[ids] = float("-inf")
@@ -141,7 +146,14 @@ def _racket_pos_from_sensor(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) ->
         racket_body_name = contact_sensor.body_names[sensor_cfg.body_ids[0]]
         sensor_cfg._cached_racket_body_name = racket_body_name
     robot = env.scene["robot"]
-    return robot.data.body_pos_w[:, robot.body_names.index(racket_body_name)]
+    body_idx = robot.body_names.index(racket_body_name)
+    pos = robot.data.body_pos_w[:, body_idx]
+    # Shift to the paddle blade center so the hit/near-miss distance gate is measured
+    # from the same sweet spot as the reward shaping (see observations.RACKET_OFFSET_Z).
+    quat = robot.data.body_quat_w[:, body_idx]
+    offset_l = torch.zeros_like(pos)
+    offset_l[:, 2] = RACKET_OFFSET_Z
+    return pos + quat_rotate(quat, offset_l)
 
 
 def update_sac_episode_state(
@@ -159,7 +171,7 @@ def update_sac_episode_state(
     opponent_table_x_min: float = 0.0,
     opponent_table_x_max: float = 1.37,
     table_y_half: float = 0.7625,
-    hit_distance_threshold: float = 0.25,
+    hit_distance_threshold: float = 0.15,
     near_miss_threshold: float = 0.25,
     miss_margin: float = 0.15,
     out_x_limit: float = 3.0,
@@ -227,11 +239,13 @@ def update_sac_episode_state(
     env._sac_valid_return[opponent_landing] = True
     env._sac_valid_return_step[opponent_landing] = step[opponent_landing]
     env._sac_landing_y[opponent_landing] = ball_pos[opponent_landing, 1]
+    env._sac_landing_x[opponent_landing] = ball_pos[opponent_landing, 0]
     env._sac_step_event_mask[opponent_landing] |= EVENT_TO_BIT["valid_return"]
 
     env._sac_bad_hit[own_landing] = True
     env._sac_bad_hit_step[own_landing] = step[own_landing]
     env._sac_landing_y[own_landing] = ball_pos[own_landing, 1]
+    env._sac_landing_x[own_landing] = ball_pos[own_landing, 0]
     env._sac_step_event_mask[own_landing] |= EVENT_TO_BIT["bad_hit"]
 
     out_after_hit = (
@@ -282,6 +296,7 @@ def capture_sac_final_info(env: ManagerBasedEnv, done: torch.Tensor):
     env._sac_final_event_mask[done] = mask[done]
     env._sac_final_min_dist[done] = env._sac_min_dist[done]
     env._sac_final_landing_y[done] = env._sac_landing_y[done]
+    env._sac_final_landing_x[done] = env._sac_landing_x[done]
     env._sac_final_hit_outgoing_speed[done] = env._sac_hit_outgoing_speed[done]
     env._sac_final_hit_up_speed[done] = env._sac_hit_up_speed[done]
     env._sac_final_post_hit_max_outgoing_speed[done] = env._sac_post_hit_max_outgoing_speed[done]
