@@ -1,0 +1,123 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/terminations.py
+  s_a21ea680ff151e::t_da8f83b05bb332 47-70
+scripts/sac_table_tennis/train.py
+  s_a21ea680ff151e::t_996296b883ab1a 148-173,256,271,323-324
+  s_dfc76e40a0fc45::t_96ad463c84ef82 24
+  s_dfc76e40a0fc45::t_383751cf46e7f8 16,18
+  s_4932f1ad98b43f::t_7fbb16e9c2687b 28-38,204-209,220-223,228-231,236-244,253,259
+  s_4932f1ad98b43f::t_91fb0c9eaa1952 39-43,210-219,224-227,232-235
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/sac.py
+  s_4932f1ad98b43f::t_9ad95ca2a58adb 100,249
+  s_dfc76e40a0fc45::t_658fb6659f31c1 24
+  s_4932f1ad98b43f::t_7e92037d21b230 251-279
+docs/sac_table_tennis_architecture.md
+  s_eb0bb2bd4f207f::t_2ff6139f42da9a 142
+  s_22b8445ffc55ee::t_af22f756cd9cf6 243,249-250,252,254,258-259
+  s_22b8445ffc55ee::t_eb4fc25ed4f17f 287,290
+  s_22b8445ffc55ee::t_3b19c93cda1225 113
+  s_eb0bb2bd4f207f::t_11ec88f9e3e2f0 555,568-569,641
+  s_eb0bb2bd4f207f::t_ae96f0a367813c 83-84
+  s_22b8445ffc55ee::t_529191a800ad92 82,86-87
+  s_eb0bb2bd4f207f::t_bad8a61429db9c 108-109,111-112,119,129-136,140,145-166,168-178
+  s_0dd5e9583d6913::t_6ee94e108b570a 238-239,253,265,523
+  s_eb0bb2bd4f207f::t_854c6ae8151b5d 57-58
+  s_eb0bb2bd4f207f::t_cf34e39a514bd9 72,77
+  s_eb0bb2bd4f207f::t_ca536448cff947 102,116,124
+  s_a21ea680ff151e::t_55e8346b8d95d8 232,251,263
+  s_22b8445ffc55ee::t_2c05b7411f0d9a 267,269-273
+  s_22b8445ffc55ee::t_f20f88a784bdb6 302
+  s_a21ea680ff151e::t_cdb1ead3282175 468-469,487-488,498-499,513-522,524-545,547
+  s_eb0bb2bd4f207f::t_fa5922dcbb28bf 3,22,126,141,143
+  s_0dd5e9583d6913::t_ccfaafdb678f23 546
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/env_cfg.py
+  s_eb0bb2bd4f207f::t_b87079d9a2dd05 26,75-80,103-108
+  s_dfc76e40a0fc45::t_b329e6e49dea0b 200,207-219
+  s_dfc76e40a0fc45::t_fcd4ed1328e9bb 167,170
+  s_dfc76e40a0fc45::t_32fccbf0afa53d 184-185,188
+  s_dfc76e40a0fc45::t_e6dee9607b6ff5 191-192,195
+  s_5c9b0a7c2dd6ad::t_ced786993c8155 203-206
+  s_dfc76e40a0fc45::t_0f20c5a81b8966 229
+  s_eb0bb2bd4f207f::t_2ff6139f42da9a 35-37
+  s_eb0bb2bd4f207f::t_0b5013ca56c0aa 33-34,38-39,86-89,91-94,121-122
+  s_eb0bb2bd4f207f::t_26bebc579bce48 27-28,90,123,201,258,293
+  h_c9d7340f891f95 44,47
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/rewards.py
+  s_5c9b0a7c2dd6ad::t_d9ff4f8e8f602a 300,303-308,310-327,330-340
+  s_dfc76e40a0fc45::t_7569394b849a2c 368-420
+scripts/sac_table_tennis/play.py
+  s_a21ea680ff151e::t_4450ed995b7df5 41-58,130-131,136,139-140,142
+  s_a21ea680ff151e::t_c295fe834fd8d4 59-91,137-138,141
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/observations.py
+  s_eb0bb2bd4f207f::t_2ff6139f42da9a 199-201
+  s_eb0bb2bd4f207f::t_e841e3bbd4bb14 181,187,190-198,202-251,260
+  s_eb0bb2bd4f207f::t_5dc7e819d52b76 106-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8efc59b35caeacb3f9cec337848bd2fbc1622bd6",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_0dd5e9583d6913": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb17a-c4f4-73b3-bfa0-a56a8b716ac6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_22b8445ffc55ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b5358a0-a46b-4243-a8b0-eaa979d290c0",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_4932f1ad98b43f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb4b9-e990-77f1-83a3-41903273bb81",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_5c9b0a7c2dd6ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa76f58d-5966-47c8-b685-974c624ccb40",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_a21ea680ff151e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb0d2-1b38-7f81-9b61-c42cc658f24a",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_dfc76e40a0fc45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b23832-0110-4d6c-b6e7-2476325289b4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_eb0bb2bd4f207f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb9e4-b687-7411-b7af-8f0b6ac70437",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
