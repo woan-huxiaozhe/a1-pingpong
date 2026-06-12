@@ -38,6 +38,57 @@ from unitree_rl_lab.tasks.table_tennis_sac.sac import SACAgent  # noqa: E402
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg  # noqa: E402
 
 
+def _termination_reasons(env, done: torch.Tensor) -> dict[int, list[str]]:
+    raw_env = env.unwrapped
+    manager = getattr(raw_env, "termination_manager", None)
+    if manager is None:
+        return {}
+
+    done_cpu = done.detach().cpu().bool().reshape(-1)
+    reasons: dict[int, list[str]] = {}
+    for env_id in done_cpu.nonzero(as_tuple=True)[0].tolist():
+        active: list[str] = []
+        for term_name in manager.active_terms:
+            term_done = manager.get_term(term_name).detach().cpu().bool().reshape(-1)
+            if bool(term_done[env_id]):
+                active.append(term_name)
+        reasons[env_id] = active if active else ["unknown"]
+    return reasons
+
+
+def _joint_limit_details(env, env_id: int) -> list[str]:
+    raw_env = env.unwrapped
+    mask = getattr(raw_env, "_sac_final_joint_limit_mask", None)
+    if mask is None or env_id >= mask.shape[0]:
+        return []
+
+    mask_env = mask[env_id].detach().cpu().bool()
+    if not torch.any(mask_env):
+        return []
+
+    q = raw_env._sac_final_joint_limit_q[env_id].detach().cpu()
+    low = raw_env._sac_final_joint_limit_low[env_id].detach().cpu()
+    high = raw_env._sac_final_joint_limit_high[env_id].detach().cpu()
+    names = getattr(raw_env, "_sac_joint_limit_joint_names", None)
+    if names is None:
+        names = [f"joint_{idx}" for idx in range(mask_env.numel())]
+
+    details: list[str] = []
+    for joint_idx in mask_env.nonzero(as_tuple=True)[0].tolist():
+        q_value = float(q[joint_idx])
+        low_value = float(low[joint_idx])
+        high_value = float(high[joint_idx])
+        lower_clearance = q_value - low_value
+        upper_clearance = high_value - q_value
+        side = "low" if lower_clearance < upper_clearance else "high"
+        clearance = min(lower_clearance, upper_clearance)
+        details.append(
+            f"{names[joint_idx]}:{side} q={q_value:.4f} "
+            f"limit=[{low_value:.4f},{high_value:.4f}] clearance={clearance:.4f}"
+        )
+    return details
+
+
 def main():
     env_cfg = parse_env_cfg(
         args_cli.task,
@@ -76,12 +127,19 @@ def main():
             time.sleep(sleep_per_step)
 
         final_infos = extract_final_episode_infos(env, done)
-        for info in final_infos.values():
+        termination_reasons = _termination_reasons(env, done)
+        for env_id, info in final_infos.items():
             events = decode_events(info.event_mask)
             for event in events:
                 counts[event] = counts.get(event, 0) + 1
             completed += 1
-            print(f"[PLAY] episode={completed} events={events} landing_y={info.landing_y:.3f}")
+            reasons = termination_reasons.get(env_id, ["unknown"])
+            joint_limits = _joint_limit_details(env, env_id) if "joint_limit" in reasons else []
+            joint_limit_text = f" joint_limits={joint_limits}" if joint_limits else ""
+            print(
+                f"[PLAY] episode={completed} env={env_id} terminations={reasons} "
+                f"events={events} landing_y={info.landing_y:.3f}{joint_limit_text}"
+            )
             if completed >= args_cli.episodes:
                 break
 

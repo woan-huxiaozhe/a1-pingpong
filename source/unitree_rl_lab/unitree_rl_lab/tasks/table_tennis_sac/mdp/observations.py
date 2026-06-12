@@ -103,6 +103,47 @@ def ball_vel_relative_to_racket(env: ManagerBasedEnv, ball_name: str, racket_bod
     return (ball.data.root_lin_vel_w - racket_center_vel).clamp(-15.0, 15.0)
 
 
+def joint_pos_delta_history(
+    env: ManagerBasedEnv,
+    asset_cfg,
+    history_length: int = 3,
+    clip: float = 1.0,
+) -> torch.Tensor:
+    """Recent joint-position deltas ``[q_t-q_{t-1}, q_t-q_{t-2}, ...]``.
+
+    This gives the actor deployable velocity/trend information without depending on a
+    noisy joint-velocity estimator. The buffer updates once per policy step and resets to
+    zero deltas at episode start.
+    """
+    robot = env.scene[asset_cfg.name]
+    joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
+    attr = f"_sac_joint_pos_history_{history_length}_{asset_cfg.name}"
+    step_attr = f"_sac_joint_pos_history_step_{history_length}_{asset_cfg.name}"
+
+    if not hasattr(env, attr):
+        history = joint_pos.unsqueeze(1).repeat(1, history_length + 1, 1)
+        setattr(env, attr, history)
+        setattr(env, step_attr, torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device))
+
+    history = getattr(env, attr)
+    last_step = getattr(env, step_attr)
+    step = env.episode_length_buf.to(torch.long)
+
+    reset = (last_step < 0) | (step == 0) | (step < last_step)
+    if torch.any(reset):
+        history[reset] = joint_pos[reset].unsqueeze(1).repeat(1, history_length + 1, 1)
+        last_step[reset] = step[reset]
+
+    push = step != last_step
+    if torch.any(push):
+        history[push] = torch.roll(history[push], shifts=1, dims=1)
+        history[push, 0] = joint_pos[push]
+        last_step[push] = step[push]
+
+    deltas = history[:, 0:1] - history[:, 1:]
+    return deltas.reshape(env.num_envs, history_length * joint_pos.shape[-1]).clamp(-clip, clip)
+
+
 def ball_pos_history(
     env: ManagerBasedEnv,
     ball_name: str,
@@ -137,15 +178,77 @@ def ball_pos_history(
     return history.reshape(env.num_envs, history_length * 3)
 
 
+def hit_command_at_robot_x(
+    env: ManagerBasedEnv,
+    ball_name: str,
+    robot_x: float,
+    robot_side: int,
+) -> torch.Tensor:
+    """Clean simulator hit command: ``[p_hit_x, p_hit_y, p_hit_z, tau]``."""
+    hit = ball_predicted_hit_point(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)
+    x = torch.full((hit.shape[0], 1), robot_x, device=hit.device, dtype=hit.dtype)
+    return torch.cat([x, hit[:, 0:2], hit[:, 2:3]], dim=-1)
+
+
+def estimated_hit_command_at_robot_x(
+    env: ManagerBasedEnv,
+    ball_name: str,
+    robot_x: float,
+    robot_side: int,
+    position_noise_std_near: float = 0.01,
+    position_noise_std_far: float = 0.03,
+    tau_noise_std_near: float = 0.002,
+    tau_noise_std_far: float = 0.015,
+    far_tau: float = 0.8,
+    y_abs_limit: float = 2.0,
+    z_min: float = 0.45,
+    z_max: float = 2.0,
+) -> torch.Tensor:
+    """Deployment-style hit command with KF-like prediction error.
+
+    The clean simulator prediction is cached with phase-dependent Gaussian error so the
+    actor and critic see the same deployed command when both groups are evaluated in the
+    same policy step. The strike-plane x coordinate stays fixed at ``robot_x``; noise is
+    applied to predicted y/z and time-to-strike.
+    """
+    clean = hit_command_at_robot_x(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)
+    attr = "_sac_estimated_hit_command"
+    step_attr = "_sac_estimated_hit_command_step"
+
+    if not hasattr(env, attr):
+        setattr(env, attr, clean.clone())
+        setattr(env, step_attr, torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device))
+
+    estimate = getattr(env, attr)
+    last_step = getattr(env, step_attr)
+    step = env.episode_length_buf.to(torch.long)
+    refresh = step != last_step
+    if torch.any(refresh):
+        next_estimate = clean.clone()
+        tau = clean[:, 3:4].clamp(min=0.0)
+        phase = (tau / max(far_tau, 1.0e-6)).clamp(min=0.0, max=1.0)
+        position_std = position_noise_std_near + (position_noise_std_far - position_noise_std_near) * phase
+        tau_std = tau_noise_std_near + (tau_noise_std_far - tau_noise_std_near) * phase
+
+        next_estimate[:, 1:3] += torch.randn_like(next_estimate[:, 1:3]) * position_std
+        next_estimate[:, 3:4] += torch.randn_like(next_estimate[:, 3:4]) * tau_std
+        next_estimate[:, 1:2] = next_estimate[:, 1:2].clamp(-y_abs_limit, y_abs_limit)
+        next_estimate[:, 2:3] = next_estimate[:, 2:3].clamp(z_min, z_max)
+        next_estimate[:, 3:4] = next_estimate[:, 3:4].clamp(0.0, 3.0)
+
+        estimate[refresh] = next_estimate[refresh]
+        last_step[refresh] = step[refresh]
+
+    return estimate
+
+
 def predicted_hit_point_at_robot_x(
     env: ManagerBasedEnv,
     ball_name: str,
     robot_x: float,
     robot_side: int,
 ) -> torch.Tensor:
-    hit = ball_predicted_hit_point(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)
-    x = torch.full((hit.shape[0], 1), robot_x, device=hit.device, dtype=hit.dtype)
-    return torch.cat([x, hit[:, 0:2]], dim=-1)
+    return hit_command_at_robot_x(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)[:, :3]
 
 
 def time_to_predicted_intercept(
@@ -154,5 +257,4 @@ def time_to_predicted_intercept(
     robot_x: float,
     robot_side: int,
 ) -> torch.Tensor:
-    hit = ball_predicted_hit_point(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)
-    return hit[:, 2:3]
+    return hit_command_at_robot_x(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)[:, 3:4]

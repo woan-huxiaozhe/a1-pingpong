@@ -21,7 +21,7 @@ class SACConfig:
     gamma: float = 0.98
     tau: float = 0.005
     initial_alpha: float = 0.02
-    min_alpha: float = 0.005
+    min_alpha: float = 0.02
     target_entropy: float | None = None
 
 
@@ -97,6 +97,7 @@ class SACAgent:
         self.actor_obs_dim = int(actor_obs_dim)
         self.critic_obs_dim = int(critic_obs_dim)
         self.action_dim = int(action_dim)
+        self.checkpoint_step = 0
         target_entropy = self.config.target_entropy
         self.target_entropy = -float(action_dim) if target_entropy is None else float(target_entropy)
         self._min_log_alpha = math.log(self.config.min_alpha) if self.config.min_alpha > 0.0 else None
@@ -245,4 +246,35 @@ class SACAgent:
         agent.actor_opt.load_state_dict(checkpoint["actor_opt"])
         agent.critic_opt.load_state_dict(checkpoint["critic_opt"])
         agent.alpha_opt.load_state_dict(checkpoint["alpha_opt"])
+        agent.checkpoint_step = int(checkpoint.get("step", 0))
+        return agent
+
+    @classmethod
+    def load_actor_only(
+        cls,
+        path: str | Path,
+        *,
+        actor_obs_dim: int,
+        critic_obs_dim: int,
+        action_dim: int,
+        device: str | torch.device = "cuda",
+    ) -> "SACAgent":
+        checkpoint = torch.load(path, map_location=device)
+        if int(checkpoint["actor_obs_dim"]) != int(actor_obs_dim):
+            raise ValueError(f"Actor obs dim mismatch: checkpoint={checkpoint['actor_obs_dim']}, env={actor_obs_dim}")
+        if int(checkpoint["action_dim"]) != int(action_dim):
+            raise ValueError(f"Action dim mismatch: checkpoint={checkpoint['action_dim']}, env={action_dim}")
+
+        config = SACConfig(**checkpoint["config"])
+        agent = cls(
+            actor_obs_dim,
+            critic_obs_dim,
+            action_dim,
+            config=config,
+            device=device,
+        )
+        agent.actor.load_state_dict(checkpoint["actor"])
+        agent.log_alpha.data.copy_(checkpoint["log_alpha"].to(agent.device))
+        agent._clamp_log_alpha()
+        agent.checkpoint_step = int(checkpoint.get("step", 0))
         return agent

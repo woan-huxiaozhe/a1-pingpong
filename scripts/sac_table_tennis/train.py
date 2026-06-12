@@ -13,18 +13,34 @@ from isaaclab.app import AppLauncher  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Train A1-TableTennis-SAC-Catch with custom PyTorch SAC.")
 parser.add_argument("--task", type=str, default="A1-TableTennis-SAC-Catch")
-parser.add_argument("--num_envs", type=int, default=None)
+parser.add_argument("--num_envs", type=int, default=1024)
 parser.add_argument("--seed", type=int, default=1)
-parser.add_argument("--max_updates", type=int, default=10_000)
+parser.add_argument("--max_updates", type=int, default=30_000)
 parser.add_argument("--start_steps", type=int, default=20_000, help="Random-action transitions before SAC updates.")
 parser.add_argument("--batch_size", type=int, default=4096)
 parser.add_argument("--replay_size", type=int, default=1_000_000)
 parser.add_argument("--event_table_size", type=int, default=250_000)
 parser.add_argument("--sampler", choices=("uniform", "stratified"), default="stratified")
-parser.add_argument("--updates_per_step", type=int, default=1)
+parser.add_argument("--updates_per_step", type=int, default=4)
 parser.add_argument("--log_interval", type=int, default=100)
 parser.add_argument("--checkpoint_interval", type=int, default=1000)
 parser.add_argument("--log_dir", type=str, default=None)
+parser.add_argument(
+    "--resume_checkpoint",
+    type=str,
+    default=None,
+    help="Resume SAC network, optimizer, alpha, and update counter from this checkpoint.",
+)
+parser.add_argument(
+    "--resume_random_start",
+    action="store_true",
+    help="Use random actions during start_steps when resuming. By default resumed warmup uses the loaded policy.",
+)
+parser.add_argument(
+    "--resume_actor_only",
+    action="store_true",
+    help="Warm-start only the actor and alpha from checkpoint; initialize critics for the current observation shape.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -129,6 +145,32 @@ def _log_episode_stats(writer, stats: dict, step: int) -> str:
     )
 
 
+def _new_reward_term_stats(reward_manager) -> dict:
+    return {
+        "steps": 0,
+        "total_sum": 0.0,
+        "term_sums": {name: 0.0 for name in reward_manager.active_terms},
+    }
+
+
+def _accumulate_reward_term_stats(stats: dict, env, reward: torch.Tensor):
+    reward_manager = env.unwrapped.reward_manager
+    stats["steps"] += 1
+    stats["total_sum"] += float(reward.detach().mean().cpu())
+    step_reward = reward_manager._step_reward.detach()
+    for term_idx, term_name in enumerate(reward_manager.active_terms):
+        stats["term_sums"][term_name] += float(step_reward[:, term_idx].mean().cpu())
+
+
+def _log_reward_term_stats(writer, stats: dict, step: int):
+    if writer is None or stats["steps"] <= 0:
+        return
+    inv_steps = 1.0 / float(stats["steps"])
+    writer.add_scalar("reward/total_mean", stats["total_sum"] * inv_steps, step)
+    for term_name, value_sum in stats["term_sums"].items():
+        writer.add_scalar(f"reward_terms/{term_name}", value_sum * inv_steps, step)
+
+
 def main():
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
@@ -159,13 +201,47 @@ def main():
     action_dim = int(env.action_space.shape[-1])
     device = obs_actor.device
 
-    agent = SACAgent(
-        obs_actor.shape[-1],
-        obs_critic.shape[-1],
-        action_dim,
-        config=SACConfig(),
-        device=device,
-    )
+    is_resume = args_cli.resume_checkpoint is not None
+    resume_step = 0
+    if is_resume:
+        resume_checkpoint = os.path.abspath(os.path.expanduser(args_cli.resume_checkpoint))
+        if not os.path.isfile(resume_checkpoint):
+            raise FileNotFoundError(f"Resume checkpoint does not exist: {resume_checkpoint}")
+        if args_cli.resume_actor_only:
+            agent = SACAgent.load_actor_only(
+                resume_checkpoint,
+                actor_obs_dim=obs_actor.shape[-1],
+                critic_obs_dim=obs_critic.shape[-1],
+                action_dim=action_dim,
+                device=device,
+            )
+        else:
+            agent = SACAgent.load(resume_checkpoint, device=device)
+        resume_step = int(agent.checkpoint_step)
+        if agent.actor_obs_dim != obs_actor.shape[-1]:
+            raise ValueError(f"Actor obs dim mismatch: checkpoint={agent.actor_obs_dim}, env={obs_actor.shape[-1]}")
+        if agent.critic_obs_dim != obs_critic.shape[-1]:
+            raise ValueError(
+                f"Critic obs dim mismatch: checkpoint={agent.critic_obs_dim}, env={obs_critic.shape[-1]}. "
+                "Use --resume_actor_only to warm-start the actor after changing critic-only observations."
+            )
+        if agent.action_dim != action_dim:
+            raise ValueError(f"Action dim mismatch: checkpoint={agent.action_dim}, env={action_dim}")
+        if resume_step >= args_cli.max_updates:
+            raise ValueError(f"--max_updates ({args_cli.max_updates}) must be greater than resume step ({resume_step}).")
+        resume_mode = "actor-only warm start" if args_cli.resume_actor_only else "full resume"
+        print(f"[INFO] Resumed SAC checkpoint: {resume_checkpoint} (step={resume_step}, mode={resume_mode})")
+        if args_cli.resume_actor_only:
+            print("[INFO] Critics and optimizers were initialized for the current environment observation shape.")
+        print("[INFO] Replay buffer is not stored in SAC checkpoints; this run starts with an empty replay buffer.")
+    else:
+        agent = SACAgent(
+            obs_actor.shape[-1],
+            obs_critic.shape[-1],
+            action_dim,
+            config=SACConfig(),
+            device=device,
+        )
     replay = UniformReplayBuffer(args_cli.replay_size, device="cpu")
     event_tables = make_event_tables(args_cli.event_table_size)
     sampler = StratifiedReplaySampler(replay, event_tables)
@@ -174,12 +250,13 @@ def main():
     episode_steps = torch.zeros(num_envs, dtype=torch.long)
 
     global_transitions = 0
-    update_count = 0
+    update_count = resume_step
     last_losses: dict[str, float] = {}
     episode_stats = _new_episode_stats()
+    reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
 
     while update_count < args_cli.max_updates:
-        if global_transitions < args_cli.start_steps:
+        if global_transitions < args_cli.start_steps and (not is_resume or args_cli.resume_random_start):
             action = torch.empty(num_envs, action_dim, device=device).uniform_(-1.0, 1.0)
         else:
             action = agent.act(obs_actor, deterministic=False).to(device)
@@ -191,6 +268,7 @@ def main():
         next_actor, next_critic = split_actor_critic_obs(next_obs)
         if not torch.isfinite(reward).all():
             raise RuntimeError("Non-finite reward returned by environment.")
+        _accumulate_reward_term_stats(reward_term_stats, env, reward)
 
         indices, versions = replay.add_batch(
             obs_actor=obs_actor,
@@ -242,6 +320,8 @@ def main():
                     sizes = table_sizes(event_tables, replay)
                     episode_summary = _log_episode_stats(writer, episode_stats, update_count)
                     episode_stats = _new_episode_stats()
+                    _log_reward_term_stats(writer, reward_term_stats, update_count)
+                    reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
                     if writer is not None:
                         for key, value in sizes.items():
                             writer.add_scalar(f"event_table/{key}", value, update_count)

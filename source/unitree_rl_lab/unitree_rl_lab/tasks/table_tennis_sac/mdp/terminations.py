@@ -44,7 +44,30 @@ def joint_position_limit_violation(
     robot: Articulation = env.scene[asset_cfg.name]
     joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
     limits = robot.data.soft_joint_pos_limits[:, asset_cfg.joint_ids]
-    done = torch.any((joint_pos < limits[..., 0] + margin) | (joint_pos > limits[..., 1] - margin), dim=-1)
+    violation = (joint_pos < limits[..., 0] + margin) | (joint_pos > limits[..., 1] - margin)
+    done = torch.any(violation, dim=-1)
+    if torch.any(done):
+        num_envs, num_joints = joint_pos.shape
+        if not hasattr(env, "_sac_final_joint_limit_q") or env._sac_final_joint_limit_q.shape != joint_pos.shape:
+            env._sac_final_joint_limit_q = torch.full(
+                (num_envs, num_joints), float("nan"), dtype=joint_pos.dtype, device=env.device
+            )
+            env._sac_final_joint_limit_low = torch.full_like(env._sac_final_joint_limit_q, float("nan"))
+            env._sac_final_joint_limit_high = torch.full_like(env._sac_final_joint_limit_q, float("nan"))
+            env._sac_final_joint_limit_mask = torch.zeros(
+                (num_envs, num_joints), dtype=torch.bool, device=env.device
+            )
+            joint_ids = asset_cfg.joint_ids
+            if isinstance(joint_ids, slice):
+                resolved_joint_ids = list(range(len(robot.joint_names)))[joint_ids]
+            else:
+                resolved_joint_ids = [int(idx) for idx in joint_ids]
+            env._sac_joint_limit_joint_names = [robot.joint_names[idx] for idx in resolved_joint_ids]
+
+        env._sac_final_joint_limit_q[done] = joint_pos[done]
+        env._sac_final_joint_limit_low[done] = limits[..., 0][done]
+        env._sac_final_joint_limit_high[done] = limits[..., 1][done]
+        env._sac_final_joint_limit_mask[done] = violation[done]
     capture_sac_final_info(env, done)
     return done
 

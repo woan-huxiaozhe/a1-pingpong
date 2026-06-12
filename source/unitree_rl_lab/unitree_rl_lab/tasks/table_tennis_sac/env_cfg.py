@@ -17,26 +17,34 @@ from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
     OWN_TABLE_X,
     RACKET_BODY_NAME,
     RIGHT_ARM_JOINT_NAMES,
-    ROBOT_BASE_X,
     ROBOT_SIDE,
-    ROBOT_X,
     TABLE_Z,
     X1TableTennisSceneCfg,
 )
 
 BALL_HISTORY_LENGTH = 4
+JOINT_POS_DELTA_HISTORY_LENGTH = 3
+SAC_ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE
+SAC_ROBOT_X = -1.47
 
 SAC_READY_LIFT_POS = -0.22
 SAC_READY_JOINT_POS = [1.53, -0.39, 1.60, -1.32, 0.0, 1.0, -1.845288]
 SAC_MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]
+SAC_HIT_COMMAND_NOISE = {
+    "position_noise_std_near": 0.01,
+    "position_noise_std_far": 0.03,
+    "tau_noise_std_near": 0.002,
+    "tau_noise_std_far": 0.015,
+    "far_tau": 0.8,
+}
 
 SAC_FIXED_MIDDLE_BALL = {
     "x_range": (-1.25 * ROBOT_SIDE, -1.25 * ROBOT_SIDE),
     "y_range": (0.0, 0.0),
-    "z_range": (1.05, 1.05),
+    "z_range": (1.1, 1.1),
     "vx_range": (3.4 * ROBOT_SIDE, 3.4 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
-    "vz_range": (0.0, 0.0),
+    "vz_range": (2.0, 2.0),
 }
 
 
@@ -64,15 +72,25 @@ class ObservationsCfg:
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
         )
-        joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
+        joint_pos_delta_history = ObsTerm(
+            func=mdp.joint_pos_delta_history,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES),
+                "history_length": JOINT_POS_DELTA_HISTORY_LENGTH,
+            },
         )
-        racket_pos = ObsTerm(func=mdp.racket_pos, params={"racket_body_name": RACKET_BODY_NAME})
-        racket_normal = ObsTerm(func=mdp.racket_normal, params={"racket_body_name": RACKET_BODY_NAME})
         ball_pos_history = ObsTerm(
             func=mdp.ball_pos_history,
             params={"ball_name": "ball", "history_length": BALL_HISTORY_LENGTH},
+        )
+        estimated_hit_command = ObsTerm(
+            func=mdp.estimated_hit_command_at_robot_x,
+            params={
+                "ball_name": "ball",
+                "robot_x": SAC_ROBOT_X,
+                "robot_side": ROBOT_SIDE,
+                **SAC_HIT_COMMAND_NOISE,
+            },
         )
         last_action = ObsTerm(func=mdp.last_action)
 
@@ -82,6 +100,12 @@ class ObservationsCfg:
 
     @configclass
     class CriticCfg(ActorCfg):
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
+        )
+        racket_pos = ObsTerm(func=mdp.racket_pos, params={"racket_body_name": RACKET_BODY_NAME})
+        racket_normal = ObsTerm(func=mdp.racket_normal, params={"racket_body_name": RACKET_BODY_NAME})
         ball_vel = ObsTerm(func=mdp.ball_vel_w, params={"ball_name": "ball"})
         racket_vel = ObsTerm(func=mdp.racket_vel, params={"racket_body_name": RACKET_BODY_NAME})
         racket_ang_vel = ObsTerm(func=mdp.racket_ang_vel, params={"racket_body_name": RACKET_BODY_NAME})
@@ -94,13 +118,9 @@ class ObservationsCfg:
             params={"ball_name": "ball", "racket_body_name": RACKET_BODY_NAME},
         )
         racket_axes = ObsTerm(func=mdp.racket_axes, params={"racket_body_name": RACKET_BODY_NAME})
-        predicted_hit_point = ObsTerm(
-            func=mdp.predicted_hit_point_at_robot_x,
-            params={"ball_name": "ball", "robot_x": ROBOT_X, "robot_side": ROBOT_SIDE},
-        )
-        time_to_predicted_intercept = ObsTerm(
-            func=mdp.time_to_predicted_intercept,
-            params={"ball_name": "ball", "robot_x": ROBOT_X, "robot_side": ROBOT_SIDE},
+        groundtruth_hit_command = ObsTerm(
+            func=mdp.hit_command_at_robot_x,
+            params={"ball_name": "ball", "robot_x": SAC_ROBOT_X, "robot_side": ROBOT_SIDE},
         )
 
     policy: ActorCfg = ActorCfg()
@@ -144,10 +164,10 @@ class RewardsCfg:
             "proximity_gate": 0.45,
         },
     )
-    hit = RewTerm(func=mdp.sac_event_reward, weight=10.0, params={"event": "hit"})
+    hit = RewTerm(func=mdp.sac_event_reward, weight=2.0, params={"event": "hit"})
     quality_hit = RewTerm(
         func=mdp.sac_quality_hit_reward,
-        weight=60.0,
+        weight=6.0,
         params={
             "ball_name": "ball",
             "racket_body_name": RACKET_BODY_NAME,
@@ -161,29 +181,42 @@ class RewardsCfg:
             "center_floor": 0.15,
         },
     )
-    return_cross_net = RewTerm(func=mdp.sac_event_reward, weight=200.0, params={"event": "return"})
-    valid_return = RewTerm(func=mdp.sac_event_reward, weight=200.0, params={"event": "valid_return"})
+    return_cross_net = RewTerm(func=mdp.sac_event_reward, weight=15.0, params={"event": "return"})
+    valid_return = RewTerm(func=mdp.sac_event_reward, weight=25.0, params={"event": "valid_return"})
     landing_placement = RewTerm(
         func=mdp.sac_landing_placement,
-        weight=200.0,
+        weight=10.0,
         params={"target_x": OPP_TABLE_CENTER_X, "target_y": 0.0, "sigma_x": 0.35, "sigma_y": 0.4},
     )
-    miss = RewTerm(func=mdp.sac_miss_penalty, weight=-50.0)
-    bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-40.0)
+    miss = RewTerm(func=mdp.sac_miss_penalty, weight=-5.0)
+    bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-3.0)
     post_hit_outgoing = RewTerm(
         func=mdp.post_hit_outgoing_velocity,
-        weight=3.0,
+        weight=1.0,
         params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_speed": 3.5},
     )
     post_hit_net_progress = RewTerm(
         func=mdp.post_hit_net_progress,
-        weight=2.0,
-        params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": ROBOT_X},
+        weight=0.5,
+        params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": SAC_ROBOT_X},
     )
-    post_hit_lift = RewTerm(
-        func=mdp.post_hit_lift_velocity,
-        weight=1.0,
-        params={"ball_name": "ball", "target_up_speed": 1.0},
+    post_hit_net_clearance = RewTerm(
+        func=mdp.post_hit_net_clearance,
+        weight=4.0,
+        params={"ball_name": "ball", "robot_side": ROBOT_SIDE},
+    )
+    post_hit_landing_prediction = RewTerm(
+        func=mdp.post_hit_landing_prediction,
+        weight=5.0,
+        params={
+            "ball_name": "ball",
+            "robot_side": ROBOT_SIDE,
+            "target_x": OPP_TABLE_CENTER_X,
+            "table_x_min": OPP_TABLE_X[0],
+            "table_x_max": OPP_TABLE_X[1],
+            "table_z": TABLE_Z,
+            "sigma_x": 0.5,
+        },
     )
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
     joint_acc = RewTerm(
@@ -193,7 +226,7 @@ class RewardsCfg:
     )
     joint_limit = RewTerm(
         func=mdp.joint_limit_margin_penalty,
-        weight=-2.0,
+        weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin": 0.20},
     )
 
@@ -222,7 +255,7 @@ class EventCfg:
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[RACKET_BODY_NAME]),
             "ball_name": "ball",
-            "robot_x": ROBOT_X,
+            "robot_x": SAC_ROBOT_X,
             "robot_side": ROBOT_SIDE,
             "own_table_x_min": OWN_TABLE_X[0],
             "own_table_x_max": OWN_TABLE_X[1],
@@ -257,7 +290,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         self.sim.physx.enable_ccd = True
-        self.scene.robot.init_state.pos = (ROBOT_BASE_X, 0.0, 0.0)
+        self.scene.robot.init_state.pos = (SAC_ROBOT_BASE_X, 0.0, 0.0)
         if ROBOT_SIDE < 0:
             self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         joint_pos = dict(self.scene.robot.init_state.joint_pos)

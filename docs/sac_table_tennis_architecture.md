@@ -1,6 +1,6 @@
 # A1 Table Tennis SAC Training Architecture
 
-Last updated: 2026-06-10
+Last updated: 2026-06-12
 
 This document is the architecture note for the independent SAC table-tennis pipeline. When the SAC task's observation, action, reward, replay, event logic, latency model, training loop, or TensorBoard logging changes, update this file in the same change.
 
@@ -19,7 +19,7 @@ Current non-goals:
 - No expert imitation.
 - No `ReferenceResidualJointAction`.
 - No HER in active training yet. HER reward recomputation exists only as a scaffold.
-- No asymmetric/noisy actor yet. Actor and critic observations are currently identical.
+- Actor now receives a deployment-style estimated hit command; critic additionally receives the clean simulator hit command.
 - No serve randomization, spin, target-y curriculum, or real sensor latency model yet.
 
 Main entry points:
@@ -54,8 +54,8 @@ Robot and scene:
   - `joint_yb_7`
 - Racket body: `Link_yb_paddle`.
 - Robot side: `ROBOT_SIDE = -1`.
-- Robot base x: `-1.7`.
-- Robot contact/evaluation x: `-1.5`.
+- Robot base x: `SAC_ROBOT_BASE_X = -(1.37 + 0.45) = -1.82`.
+- Robot contact/evaluation x: `SAC_ROBOT_X = -1.47`.
 - Own table x range: `[-1.37, 0.0]`.
 - Opponent table x range: `[0.0, 1.37]`.
 - Net x: `0.0`.
@@ -69,20 +69,22 @@ SAC_FIXED_MIDDLE_BALL = {
     "z_range": (1.05, 1.05),
     "vx_range": (-3.4, -3.4),
     "vy_range": (0.0, 0.0),
-    "vz_range": (0.0, 0.0),
+    "vz_range": (1.57, 1.57),
 }
 ```
 
 The ball is reset once per episode by `launch_ball`. It now starts near the opponent-side table edge instead of spawning close to the middle of the table, because the previous `x=0.35, z=1.10, vx=-2.4, vz=0.2` setup tended to land on the robot half too early and could show repeated bounces on the robot side before the arm interacted with it.
+With the current fixed ball and `SAC_ROBOT_X = -1.47`, the analytic bounce model predicts a table bounce around `x = -0.284 m` and a strike-plane height of about `1.06 m` after `0.80 s`, slightly above the current ready-pose paddle-center height.
 
 Robot reset:
 
 - Every episode reset now writes the fixed-base robot root back to its default root state.
-- The locked lift joint is initialized through `SAC_READY_LIFT_POS = -0.17`.
-- This is the midpoint between the original SAC/A1 default lift `-0.28` and the higher tested lift `-0.06`. Isaac reports the lift joint's legal range as `[-0.800, -0.050]`; an FK-only solve for exactly `1.16 m` paddle height with the current 7DOF ready pose would require about `+0.126`, which is outside the joint limit.
+- The locked lift joint is initialized through `SAC_READY_LIFT_POS = -0.22`.
+- Isaac reports the lift joint's legal range as `[-0.800, -0.050]`. This value sits between the original SAC/A1 default lift `-0.28` and the higher tested lift `-0.06`.
+- A static USD joint-anchor FK check estimates the current ready-pose paddle-center height at about `1.016 m`; the fixed ball above is tuned to cross `x = -1.47` slightly above that height.
 - The controlled right arm is reset to `SAC_READY_JOINT_POS`.
-- Current user-provided backhand ready pose:
-  - `[1.533406, -0.523925, 1.60474, -1.183103, -0.007649, 1.042375, -1.845288]`
+- Current ready pose:
+  - `[1.53, -0.39, 1.60, -1.32, 0.0, 1.0, -1.845288]`
 - Joint velocities are reset to zero.
 - The `JointDeltaTargetAction` internal target is also reset so the first post-reset action is relative to the ready pose, not to the previous episode's target.
 
@@ -97,47 +99,83 @@ Timing:
 
 ## 3. Observation
 
-The observation was simplified for real-machine feasibility. The current policy observation does not include privileged predicted intercept features or ball velocity in racket frame.
+The observation is kept close to real-machine feasibility. The actor receives a noisy deployment-style hit command (`p_hit`, `tau`) and recent joint-position deltas, but does not receive privileged clean intercept, clean joint velocity, or clean racket FK features.
 
 Current groups:
 
 - `policy`: actor observation.
 - `critic`: critic observation.
-- These two groups currently have the same terms and same dimension.
+- `policy` is the deployment-facing actor input and must stay compatible with real robot signals.
+- `critic` is the training-only value input. It contains the full actor observation plus privileged simulator state. Actor is 51D, critic is 92D.
 
-Current dimension:
+### Actor Obs (`policy`)
+
+Actor dimension:
 
 ```text
-7 + 7 + 3 + 3 + 4*3 + 7 = 39
+7 + 3*7 + 4*3 + 4 + 7 = 51
 ```
 
-Terms:
+Actor terms:
 
 | Term | Dim | Meaning |
 | --- | ---: | --- |
 | `joint_pos` | 7 | Right-arm joint position relative term from IsaacLab MDP. |
-| `joint_vel` | 7 | Right-arm joint velocity relative term from IsaacLab MDP. |
-| `racket_pos` | 3 | Racket center position in env/world frame, minus env origin. |
-| `racket_normal` | 3 | Racket local +Y normal rotated into world frame. |
+| `joint_pos_delta_history` | 21 | Three recent deployable joint-position deltas: `[q_t-q_{t-1}, q_t-q_{t-2}, q_t-q_{t-3}]`. |
 | `ball_pos_history` | 12 | `K=4` ball positions in env/world frame, newest sample first. |
+| `estimated_hit_command` | 4 | Deployment-style `[p_hit_x, p_hit_y, p_hit_z, tau]` predicted at the robot strike plane with KF-like phase-dependent noise. |
 | `last_action` | 7 | Previous normalized action from the action manager. |
 
-Important details:
+Actor exclusions:
+
+- No clean simulator `joint_vel`.
+- No clean `racket_pos`, `racket_normal`, or racket velocity.
+- No clean `predicted_hit_point` or clean `time_to_intercept`.
+- No explicit `ball_vel`; the actor can infer ball velocity from `ball_pos_history`.
+
+Actor details:
 
 - `ball_pos_history` is sampled at policy-step cadence, so adjacent samples are 20 ms apart.
 - The newest `ball_pos_history` entry is the current ball position. The history is not an explicit delay.
-- Ball velocity can be inferred by the network from position history; no explicit `ball_vel` observation is used now.
-- No `predicted_hit_point` or `time_to_intercept` observation is used now.
-- No racket velocity observation is used now.
-- No joint position history is used now.
-- No observation noise, dropout, or latency is injected now.
+- Joint velocity is inferred from `joint_pos_delta_history`, using position differences instead of raw/clean velocity.
+- The actor's `estimated_hit_command` uses cached noise per policy step so the actor and critic share the same deployment estimate when both observation groups are evaluated.
+- `p_hit_x` is fixed at the robot strike plane; noise is injected into predicted y/z and `tau`. The default actor-side noise shrinks from `0.03 m` / `0.015 s` far from contact to `0.01 m` / `0.002 s` near contact. At `tau = 0.25 s`, this gives about `16 mm` per-axis y/z standard deviation, or about `20 mm` expected 2D position error, matching the current KF-level deployment estimate.
+- No ball-history noise, dropout, or latency is injected now.
 
-The actor/critic split is still kept in the storage and SAC API:
+### Critic Obs (`critic`)
 
-- Actor input: `obs_actor`.
-- Critic input: `obs_critic`.
-- Current stage: both are 39D and identical.
-- Future asymmetric stage: actor can receive delayed/noisy ball history while critic keeps true simulator state.
+Critic dimension:
+
+```text
+51 actor dims + 41 privileged dims = 92
+```
+
+Critic includes every actor term above, plus:
+
+| Term | Dim | Meaning |
+| --- | ---: | --- |
+| `joint_vel` | 7 | Clean simulator right-arm joint velocity. |
+| `racket_pos` | 3 | Clean FK paddle blade-center position in env/world frame, minus env origin. |
+| `racket_normal` | 3 | Clean FK racket local +Y normal rotated into world frame. |
+| `ball_vel` | 3 | Clean simulator ball linear velocity. |
+| `racket_vel` | 3 | Clean paddle blade-center linear velocity. |
+| `racket_ang_vel` | 3 | Clean racket body angular velocity. |
+| `ball_pos_rel_racket` | 3 | Clean ball position relative to the paddle blade center. |
+| `ball_vel_rel_racket` | 3 | Clean ball velocity relative to the paddle blade center velocity. |
+| `racket_axes` | 9 | Clean FK racket local X/Y/Z axes in world frame. |
+| `groundtruth_hit_command` | 4 | Clean simulator `[p_hit_x, p_hit_y, p_hit_z, tau]` at the fixed strike plane. |
+
+Critic details:
+
+- Critic input is `obs_critic`; actor input is `obs_actor`.
+- SAC stores and samples both observation groups separately in replay.
+- Actor updates still sample actions from `obs_actor`; critics evaluate those actions using `obs_critic`.
+- This realizes the target-command asymmetric stage: the critic sees both the actor's noisy deployment hit command and the clean simulator hit command, while the actor stays on deployable signals.
+- A future step can additionally delay/noise the actor ball history while keeping critic observations clean.
+
+Shared geometry note:
+
+- The racket reference point used by `racket_pos`/`racket_normal` and all racket-based reward terms is the paddle blade center, i.e. the `Link_yb_paddle` body origin plus a local `+Z 0.045 m` offset (`observations.RACKET_OFFSET_Z`). See §5 for why this matters for center-vs-handle contact.
 
 ## 4. Action
 
@@ -191,37 +229,48 @@ Underlying A1 right-arm actuator limits:
 | `joint_yb_6` | `20 rad/s` | `8 Nm` | `120` | `0.5` |
 | `joint_yb_7` | `20 rad/s` | `8 Nm` | `120` | `0.5` |
 
-Termination currently uses actual joint position limit violation with margin `0.005`, not the action term's raw target violation flag.
+Joint targets are clamped by the action term. Joint-limit termination is currently disabled for SAC training because early runs learned to terminate episodes by driving `joint_yb_6` into the high limit before the ball reached the racket. Limit avoidance is handled by the `joint_limit` barrier reward instead.
 
 ## 5. Reward
 
 IsaacLab reward terms are configured in `RewardsCfg`. In practice, the event weights were scaled by `1 / 0.02 = 50` so that after 20 ms reward integration they behave like the intended sparse bonuses:
 
-- hit: about `+1`.
+- hit: about `+0.2`.
+- quality hit: up to `+1.2`.
 - return/cross-net: about `+4`.
 - valid return: about `+8`.
 - miss: about `-1`.
-- bad hit: about `-2`.
+- bad hit: about `-0.8`.
 
 Current reward terms:
 
 | Term | Weight | Effective one-step scale at 20 ms | Meaning |
 | --- | ---: | ---: | --- |
-| `racket_ball_proximity` | `0.4` | up to `0.008` | Dense `exp(-12 * distance^2)` between racket and ball. |
-| `racket_approach` | `0.1` | up to `0.002` | Reward positive racket velocity toward the ball, centered near `1.0 m/s`. |
-| `racket_forward_push` | `2.0` | up to `0.04` per step | Before hit, when the ball is near the racket, encourages racket velocity toward the opponent side. |
-| `hit` | `50.0` | `+1.0` | Step event reward when first racket contact is detected. Lowered so passive contact is not enough. |
+| `racket_ball_proximity` | `0.4` | up to `0.008` | Dense `exp(-12 * distance^2)` between racket (blade center) and ball. |
+| `racket_approach` | `0.4` | up to `0.008` | Racket closing speed toward the ball, **monotonic up to `target_vel = 3.0 m/s`** then saturating. No penalty for faster swings (replaces the earlier Gaussian peaked at 1 m/s, which capped hit strength). |
+| `racket_face_target` | `0.3` | up to `0.006` | Before hit, when the ball is near, rewards racket normal alignment toward the target landing region. |
+| `racket_normal_swing` | `0.6` | up to `0.012` | Before hit, rewards racket velocity along the racket normal (`target_speed = 3.0 m/s`), gated by face-target alignment. |
+| `hit` | `10.0` | `+0.2` | Step event reward when first racket contact is detected. Kept small so passive contact is not enough. |
+| `quality_hit` | `60.0` | up to `+1.2` | First-hit reward from hit-time outgoing x speed (**saturates at `target_outgoing_speed = 5.5 m/s`**) and upward speed, then multiplied by a contact-**centeredness** factor (`center_floor 0.4 .. 1.0`, `exp(-25 * d_center^2)`) so a blade-center hit pays more than an edge/handle hit. |
 | `return_cross_net` | `200.0` | `+4.0` | Step event reward when a hit ball crosses the net toward the opponent side above net height. |
 | `valid_return` | `400.0` | `+8.0` | Step event reward when a hit ball lands on the opponent table. |
 | `miss` | `-50.0` | `-1.0` | Penalty when the ball passes the robot or falls before any hit. |
-| `bad_hit` | `-100.0` | `-2.0` | Penalty when a hit ball lands on own table or goes out/falls after hit. |
-| `post_hit_outgoing` | `3.0` | up to `0.06` per step | After hit, encourages positive outgoing x velocity toward the opponent side. |
+| `bad_hit` | `-40.0` | `-0.8` | Penalty when a hit ball lands on own table or goes out/falls after hit, or fails to cross the net within the hit-to-return timeout. |
+| `post_hit_outgoing` | `3.0` | up to `0.06` per step | After hit, encourages positive outgoing x velocity toward the opponent side (`target_speed = 5.0 m/s`). |
 | `post_hit_lift` | `1.0` | up to `0.02` per step | After hit and before return, encourages upward velocity. |
 | `action_rate` | `-0.02` | regularizer | Penalizes action changes. |
 | `joint_acc` | `-1e-6` | regularizer | Penalizes joint acceleration. |
-| `joint_limit` | `-0.5` | regularizer | Penalizes proximity/violation of joint position limits. |
+| `joint_limit` | `-2.0` | barrier regularizer | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
 
-Pre-hit forward-push shaping was added after visual inspection showed the policy could get contact without a meaningful push. Post-hit shaping was added because training reached some `hit` episodes but did not yet produce `valid_return`. These terms try to make the first hits send the ball away from the robot and high enough to clear the net before the sparse `return` events become common.
+The earlier pre-hit `racket_forward_push` term was removed because fixed world-x end-effector push encouraged wrist-pitch limit-seeking. The current pre-hit shaping separates approach, face alignment, and racket-normal swing speed, which is a better fit for an articulated arm than a single-direction Cartesian push. Pure `hit` is intentionally small; `quality_hit` carries most of the contact bonus and pays only when first contact gives the ball outgoing velocity and some upward velocity. Post-hit shaping remains to make early hits send the ball away from the robot and high enough to clear the net before sparse `return` events become common.
+
+2026-06-11 retune (fix "hit but never return" / weak-swing / handle-contact). The previous run converged to `hit_rate = 1.0`, `return_rate = 0.0`, `bad_hit_rate = 1.0`: every episode hit the ball but gently (outgoing x speed parked at ~2.1 m/s) and was force-ended as `bad_hit` at the hit-to-return timeout. Three coupled causes were addressed:
+
+- Speed targets were saturating below a returnable hit. `quality_hit.target_outgoing_speed` was `2.0` (saturated, so no incentive past 2 m/s), `post_hit_outgoing.target_speed` was `2.0`, and `racket_approach` was a Gaussian peaked at `1.0 m/s` that actively penalized faster swings. These are now `5.5`, `5.0`, and a monotonic approach reward (`target_vel = 3.0`). The score clamps still cap each term's magnitude, so the saturation point moved up without changing peak reward.
+- Return was geometrically unreachable inside the old `0.40 s` hit-to-return timeout (the racket is ~1.5 m from the net; even at the rewarded 2 m/s the ball cannot cross the net before the episode is force-ended). The timeout is now `0.90 s`.
+- Contact location was unrewarded: the racket reference point was the `Link_yb_paddle` body origin (~0.045 m below the blade center) and the `0.25 m` hit gate was larger than the whole paddle, so a handle/edge contact scored the same as a center contact. The reference point is now the blade center (`RACKET_OFFSET_Z = 0.045`, used by the rewards, observations, and the hit/near-miss distance gate alike), `quality_hit` is multiplied by a centeredness factor, and the hit distance gate was tightened to `0.15 m` (still ≥ the blade's ~0.13 m center-to-corner reach, so real contacts are not lost — the contact-force check already requires physical contact).
+
+`racket_face_target` (`0.3`) and `racket_normal_swing` (`0.6`) were re-enabled in the same retune; they had been left at weight `0.0` in the converged run, which removed the only pre-hit incentive to orient and accelerate the paddle face toward the target.
 
 ## 6. Event Logic
 
@@ -235,10 +284,10 @@ Event tracking is in `mdp/events.py` and runs every 20 ms.
 
 Main thresholds:
 
-- Hit distance threshold: `0.25 m`.
+- Hit distance threshold: `0.15 m` (from the paddle blade center).
 - Near-miss threshold: `0.25 m`.
 - Contact force threshold: `0.1`.
-- Hit-to-return timeout: `0.40 s`.
+- Hit-to-return timeout: `0.90 s`.
 - Table z: `0.76 m`.
 - Net z: `0.9125 m`.
 - Table half y: `0.7625 m`.
@@ -250,7 +299,7 @@ Definitions:
 - `hit`: contact sensor force > `0.1` and racket-ball distance < `0.25`; only first hit is tagged.
 - `return`: after hit, ball crosses net x toward opponent side with sufficient x velocity and `z > net_z`.
 - `valid_return`: after hit, ball is near table height, over opponent table x range, inside y bounds, and moving down.
-- `bad_hit`: after hit, ball lands on own table, goes out/falls before valid return, or fails to cross the net within `0.40 s` after hit.
+- `bad_hit`: after hit, ball lands on own table, goes out/falls before valid return, or fails to cross the net within `0.90 s` after hit.
 - `miss`: no hit and ball has passed robot x by margin or dropped below `z_min`.
 
 Episode termination:
@@ -416,6 +465,8 @@ Loop behavior:
 
 ## 10. TensorBoard Cards
 
+The SAC TensorBoard output is split by purpose. The card count is intentional: `episode/*` measures finished-episode outcomes, `event_table/*` measures replay indexing, `batch/*` measures sampler composition, `reward_terms/*` measures shaping and penalties, and `loss/*` measures SAC optimization health.
+
 Loss cards:
 
 - `loss/critic_loss`: twin critic Bellman MSE sum.
@@ -433,6 +484,8 @@ Replay/train cards:
 
 Event table cards:
 
+These are not success rates. They are the current number of valid replay slots indexed by each stratified event table. A nonzero `event_table/hit` means the replay has hit-window samples available for oversampling, even if the current policy's recent `episode/hit_rate` is low.
+
 - `event_table/near_miss`: valid replay slots currently indexed by the near-miss table.
 - `event_table/hit`: valid replay slots currently indexed by the hit table.
 - `event_table/return`: valid replay slots currently indexed by the return table.
@@ -441,6 +494,8 @@ Event table cards:
 - `event_table/bad_hit`: valid replay slots currently indexed by the bad-hit table.
 
 Episode cards:
+
+These summarize episodes that ended inside the current logging window. They are not per-step rewards.
 
 - `episode/count`: number of episodes summarized in the current logging window.
 - `episode/near_miss_rate`: fraction of finished episodes with near miss.
@@ -455,13 +510,49 @@ Episode cards:
 - `episode/post_hit_max_outgoing_speed_mean`: max outgoing speed after hit before final outcome.
 - `episode/post_hit_max_height_mean`: max ball height after hit before final outcome.
 
+Reward cards:
+
+These are weighted reward terms from IsaacLab's `RewardManager`, averaged over environment steps in the current logging window. They are useful for checking whether a shaping term is active and whether a penalty dominates the sparse event rewards.
+
+- `reward/total_mean`: total weighted reward averaged over env steps.
+- `reward_terms/racket_ball_proximity`: dense racket-ball distance shaping.
+- `reward_terms/racket_approach`: positive racket velocity toward the ball.
+- `reward_terms/racket_face_target`: racket normal alignment toward the target landing region.
+- `reward_terms/racket_normal_swing`: racket velocity along the racket normal, gated by face-target alignment.
+- `reward_terms/hit`: sparse contact reward.
+- `reward_terms/quality_hit`: first-contact quality reward from outgoing and upward ball speed.
+- `reward_terms/return_cross_net`: sparse crossed-net reward after hit.
+- `reward_terms/valid_return`: sparse valid-return reward.
+- `reward_terms/miss`: no-hit miss penalty.
+- `reward_terms/bad_hit`: bad post-hit outcome penalty.
+- `reward_terms/post_hit_outgoing`: post-hit outgoing velocity shaping.
+- `reward_terms/post_hit_lift`: post-hit upward velocity shaping.
+- `reward_terms/action_rate`: action-change penalty.
+- `reward_terms/joint_acc`: joint-acceleration penalty.
+- `reward_terms/joint_limit`: joint-limit margin barrier penalty.
+
+Primary cards to watch during reward tuning:
+
+- `episode/hit_rate`
+- `episode/miss_rate`
+- `episode/bad_hit_rate`
+- `episode/return_rate`
+- `episode/min_dist_mean`
+- `reward_terms/racket_approach`
+- `reward_terms/racket_face_target`
+- `reward_terms/racket_normal_swing`
+- `reward_terms/joint_limit`
+- `reward_terms/hit`
+- `reward_terms/quality_hit`
+- `reward_terms/miss`
+
 ## 11. Latency Model
 
 Current explicit latency model:
 
 - No camera/vision latency is simulated.
 - No actor-only observation delay is injected.
-- No observation noise/dropout is injected.
+- KF-style noise is injected only into the actor-visible `estimated_hit_command`; no ball-position-history noise/dropout is injected.
 - No command-transport latency is simulated.
 
 Current timing effects:
@@ -474,7 +565,8 @@ Current timing effects:
 Real-machine implication:
 
 - The current observation is intentionally closer to deployable signals than the previous predicted-intercept observation.
-- It still assumes the current ball position is available with no delay.
+- It still assumes the current ball position history is available with no delay.
+- The actor-visible `estimated_hit_command` is the training proxy for the KF/trajectory-prediction output that deployment can provide.
 - The next latency-aware stage should add actor-only ball observation delay/noise/dropout while keeping critic observations true in simulation.
 
 ## 12. Evaluation
@@ -546,7 +638,7 @@ Serve curriculum recommendation:
 Deferred stages:
 
 - HER with `target_y` only after hit/return episodes are nonzero.
-- Actor/critic asymmetry with delayed/noisy actor ball observations.
+- Actor-only delayed/noisy ball-position history.
 - Serve randomization and curriculum.
 - Spin.
 - More realistic command and vision latency.

@@ -297,17 +297,47 @@ def post_hit_outgoing_velocity(
     return torch.where(active, scaled, torch.zeros_like(scaled))
 
 
-def post_hit_lift_velocity(
+def post_hit_net_clearance(
     env: ManagerBasedRLEnv,
     ball_name: str,
-    target_up_speed: float = 1.0,
+    robot_side: int,
+    net_x: float = 0.0,
+    net_z: float = 0.9125,
+    ramp_low: float = -0.6,
+    ramp_high: float = 0.1,
+    gravity: float = 9.81,
 ) -> torch.Tensor:
-    """Encourage a hit that keeps the ball high enough to clear the net."""
+    """Dense bridge toward an actual return: reward the *predicted* ball height at the net.
+
+    The sparse return/valid_return events only fire once the ball is already above the net
+    at ``x = net_x``; before the policy can ever produce such a hit they give zero gradient,
+    so training settles into a steep lob that farms ``post_hit_outgoing`` /
+    ``post_hit_net_progress`` (both height-blind) and then times out as a bad hit. This term
+    closes that gap. The scene has no air drag, so a gravity-only projectile solve predicts
+    the ball's height when it reaches the net plane *exactly*; rewarding that predicted
+    clearance gives a smooth, every-step gradient that rises as the hit gets flatter /
+    faster / struck from a higher contact point -- i.e. toward a real return.
+
+    ``ramp_low`` starts the slope *below* the current lob's clearance so there is a non-zero
+    gradient at the policy's operating point; the score saturates at ``ramp_high`` (ball
+    passing ~10 cm above the net). Over-lofting is left to ``sac_quality_hit_reward`` (the
+    up-speed band) and ``sac_landing_placement``. Active only while the ball is still on the
+    robot's side and travelling toward the net, so it shapes the approach to the net rather
+    than re-scoring a ball that has already crossed.
+    """
     _ensure_tracker(env)
     ball: RigidObject = env.scene[ball_name]
-    scaled = (ball.data.root_lin_vel_w[:, 2] / max(target_up_speed, 1.0e-6)).clamp(0.0, 1.0)
-    active = env._sac_hit & ~env._sac_return & ~env._sac_valid_return & ~env._sac_bad_hit
-    return torch.where(active, scaled, torch.zeros_like(scaled))
+    ball_x = ball.data.root_pos_w[:, 0] - env.scene.env_origins[:, 0]
+    ball_z = ball.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    outgoing_speed = -float(robot_side) * ball.data.root_lin_vel_w[:, 0]
+    vz = ball.data.root_lin_vel_w[:, 2]
+    time_to_net = (net_x - ball_x).abs() / outgoing_speed.clamp(min=0.2)
+    z_at_net = ball_z + vz * time_to_net - 0.5 * gravity * time_to_net * time_to_net
+    clearance = z_at_net - net_z
+    score = ((clearance - ramp_low) / max(ramp_high - ramp_low, 1.0e-6)).clamp(min=0.0, max=1.0)
+    before_net = (ball_x - net_x) * float(robot_side) > 0.0
+    active = env._sac_hit & ~env._sac_valid_return & ~env._sac_bad_hit & (outgoing_speed > 0.2) & before_net
+    return torch.where(active, score, torch.zeros_like(score))
 
 
 def post_hit_net_progress(
@@ -335,3 +365,56 @@ def post_hit_net_progress(
     scaled = (progress / max(span, 1.0e-6)).clamp(min=0.0, max=overshoot)
     active = env._sac_hit & ~env._sac_valid_return & ~env._sac_bad_hit
     return torch.where(active, scaled, torch.zeros_like(scaled))
+
+
+def post_hit_landing_prediction(
+    env: ManagerBasedRLEnv,
+    ball_name: str,
+    robot_side: int,
+    target_x: float,
+    table_x_min: float = 0.0,
+    table_x_max: float = 1.37,
+    table_z: float = 0.76,
+    sigma_x: float = 0.5,
+    gravity: float = 9.81,
+) -> torch.Tensor:
+    """Dense bridge toward a *valid* return: reward the *predicted* landing-x of the post-hit
+    ball when it falls back to table height, scored by how close it lands to the opponent-court
+    target and whether it lands in bounds at all.
+
+    ``post_hit_net_clearance`` shapes whether the ball gets *over* the net; this is its
+    companion, shaping where the arc comes *down*. The scene has no air drag, so a gravity-only
+    free-flight solve gives the time to return to ``table_z`` exactly:
+        t = (vz + sqrt(vz^2 + 2 g (z - table_z))) / g
+    and the predicted landing ``x = ball_x + vx t``. Rewarding an in-court predicted landing
+    gives a smooth every-step gradient toward a real return *before* the sparse valid_return
+    event is ever sampled, so the policy stops settling for a hard forward hit that flies out
+    or drops short (the bad-hit local optimum). Out-of-court predictions earn zero, so the
+    gradient pulls landings *into* ``(table_x_min, table_x_max)`` rather than merely forward.
+    """
+    _ensure_tracker(env)
+    ball: RigidObject = env.scene[ball_name]
+    ball_x = ball.data.root_pos_w[:, 0] - env.scene.env_origins[:, 0]
+    ball_z = ball.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    vx = ball.data.root_lin_vel_w[:, 0]
+    vz = ball.data.root_lin_vel_w[:, 2]
+    outgoing_speed = -float(robot_side) * vx
+
+    disc = (vz * vz + 2.0 * gravity * (ball_z - table_z)).clamp(min=0.0)
+    time_to_land = (vz + torch.sqrt(disc)) / gravity
+    landing_x = ball_x + vx * time_to_land
+
+    in_bounds = (landing_x > table_x_min) & (landing_x < table_x_max)
+    score = torch.exp(-((landing_x - target_x) ** 2) / (2.0 * sigma_x**2))
+    score = torch.where(in_bounds, score, torch.zeros_like(score))
+    score = torch.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
+
+    above_table = ball_z > table_z
+    active = (
+        env._sac_hit
+        & ~env._sac_valid_return
+        & ~env._sac_bad_hit
+        & (outgoing_speed > 0.2)
+        & above_table
+    )
+    return torch.where(active, score, torch.zeros_like(score))
