@@ -34,6 +34,16 @@ def _ensure_tracker(env: ManagerBasedEnv):
         "_sac_final_landing_x": (torch.float32, float("nan")),
         "_sac_hit_center_offset": (torch.float32, float("nan")),
         "_sac_final_hit_center_offset": (torch.float32, float("nan")),
+        # Racket body angular-velocity magnitude at first contact, used by the R_omega
+        # (sac_racket_spin_penalty) clean-contact reward that replaces the center gate.
+        "_sac_hit_racket_ang_vel": (torch.float32, float("nan")),
+        "_sac_final_hit_racket_ang_vel": (torch.float32, float("nan")),
+        # Ball xy at the first post-hit descent through table height, used by the tier-1
+        # sac_table_proximity bootstrap (records once per episode).
+        "_sac_table_cross_x": (torch.float32, float("nan")),
+        "_sac_final_table_cross_x": (torch.float32, float("nan")),
+        "_sac_table_cross_y": (torch.float32, float("nan")),
+        "_sac_final_table_cross_y": (torch.float32, float("nan")),
         "_sac_hit_outgoing_speed": (torch.float32, float("nan")),
         "_sac_hit_up_speed": (torch.float32, float("nan")),
         "_sac_post_hit_max_outgoing_speed": (torch.float32, float("-inf")),
@@ -81,6 +91,9 @@ def reset_sac_episode_state(env: ManagerBasedEnv, env_ids: torch.Tensor | None =
     env._sac_landing_y[ids] = float("nan")
     env._sac_landing_x[ids] = float("nan")
     env._sac_hit_center_offset[ids] = float("nan")
+    env._sac_hit_racket_ang_vel[ids] = float("nan")
+    env._sac_table_cross_x[ids] = float("nan")
+    env._sac_table_cross_y[ids] = float("nan")
     env._sac_hit_outgoing_speed[ids] = float("nan")
     env._sac_hit_up_speed[ids] = float("nan")
     env._sac_post_hit_max_outgoing_speed[ids] = float("-inf")
@@ -196,6 +209,12 @@ def update_sac_episode_state(
     outgoing_speed = -float(robot_side) * ball_vel[:, 0]
     racket_pos_w, racket_quat = _racket_pose_from_sensor(env, sensor_cfg)
     racket_pos = racket_pos_w - env.scene.env_origins
+    # Racket-body angular-velocity magnitude (same source as mdp.racket_ang_vel), cached at
+    # first contact for the R_omega clean-contact reward.
+    robot = env.scene["robot"]
+    racket_body_name = getattr(sensor_cfg, "_cached_racket_body_name", None)
+    racket_body_idx = robot.body_names.index(racket_body_name)
+    racket_ang_vel_mag = torch.norm(robot.data.body_ang_vel_w[:, racket_body_idx], dim=-1)
     dist = torch.norm(racket_pos - ball_pos, dim=-1)
     rel_w = ball.data.root_pos_w[:, :3] - racket_pos_w
     local_x = torch.zeros_like(rel_w)
@@ -221,6 +240,7 @@ def update_sac_episode_state(
     env._sac_hit[new_hit] = True
     env._sac_hit_step[new_hit] = step[new_hit]
     env._sac_hit_center_offset[new_hit] = hit_center_offset[new_hit]
+    env._sac_hit_racket_ang_vel[new_hit] = racket_ang_vel_mag[new_hit]
     env._sac_hit_outgoing_speed[new_hit] = outgoing_speed[new_hit]
     env._sac_hit_up_speed[new_hit] = ball_vel[new_hit, 2]
     env._sac_step_event_mask[new_hit] |= EVENT_TO_BIT["hit"]
@@ -266,6 +286,18 @@ def update_sac_episode_state(
     env._sac_landing_y[own_landing] = ball_pos[own_landing, 1]
     env._sac_landing_x[own_landing] = ball_pos[own_landing, 0]
     env._sac_step_event_mask[own_landing] |= EVENT_TO_BIT["bad_hit"]
+
+    # First post-hit descent through table height: cache ball xy once (NaN until then). This
+    # feeds the tier-1 sac_table_proximity bootstrap, which grades how close a hit that did
+    # NOT become a valid_return (own-table / out / timeout) came to the opponent table.
+    table_cross = (
+        env._sac_hit
+        & torch.isnan(env._sac_table_cross_x)
+        & near_table
+        & going_down
+    )
+    env._sac_table_cross_x[table_cross] = ball_pos[table_cross, 0]
+    env._sac_table_cross_y[table_cross] = ball_pos[table_cross, 1]
 
     out_after_hit = (
         env._sac_hit
@@ -317,6 +349,9 @@ def capture_sac_final_info(env: ManagerBasedEnv, done: torch.Tensor):
     env._sac_final_landing_y[done] = env._sac_landing_y[done]
     env._sac_final_landing_x[done] = env._sac_landing_x[done]
     env._sac_final_hit_center_offset[done] = env._sac_hit_center_offset[done]
+    env._sac_final_hit_racket_ang_vel[done] = env._sac_hit_racket_ang_vel[done]
+    env._sac_final_table_cross_x[done] = env._sac_table_cross_x[done]
+    env._sac_final_table_cross_y[done] = env._sac_table_cross_y[done]
     env._sac_final_hit_outgoing_speed[done] = env._sac_hit_outgoing_speed[done]
     env._sac_final_hit_up_speed[done] = env._sac_hit_up_speed[done]
     env._sac_final_post_hit_max_outgoing_speed[done] = env._sac_post_hit_max_outgoing_speed[done]

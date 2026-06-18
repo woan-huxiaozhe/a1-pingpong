@@ -304,6 +304,85 @@ def sac_landing_placement(
     return torch.where(fired, score, torch.zeros_like(score))
 
 
+def sac_miss_approach(env: ManagerBasedRLEnv, sigma: float = 8.0) -> torch.Tensor:
+    """Tier-0 (``miss`` event) positive shaping: how close the racket came to the ball.
+
+    Fires once on the ``miss`` event using the episode terminal minimum racket-ball distance
+    (``_sac_min_dist``). ``exp(-sigma * d^2)`` is a small positive bonus that replaces the old
+    flat ``-0.10`` miss penalty and the disabled pre-hit shaping: it gives the policy a gradient
+    to chase the ball without a negative reward that could be farmed by ending the episode
+    early. Capped below the tier-1 hit constant so a near-miss never out-earns a real hit.
+    """
+    _ensure_tracker(env)
+    fired = (env._sac_step_event_mask & EVENT_TO_BIT["miss"]) != 0
+    min_dist = torch.nan_to_num(env._sac_min_dist, nan=0.0, posinf=1.0e3, neginf=1.0e3)
+    score = torch.exp(-sigma * min_dist * min_dist)
+    return torch.where(fired, score, torch.zeros_like(score))
+
+
+def sac_table_proximity(
+    env: ManagerBasedRLEnv,
+    target_x: float,
+    table_x_min: float = 0.0,
+    table_x_max: float = 1.37,
+    table_y_half: float = 0.7625,
+    sigma: float = 8.0,
+) -> torch.Tensor:
+    """Tier-1 (``bad_hit`` event) bootstrap: how close the post-hit ball came to the opponent table.
+
+    Fires on the ``bad_hit`` outcome using the cached ball xy at first post-hit descent through
+    table height (``_sac_table_cross_x/y``). Scores ``exp(-sigma * d^2)`` where ``d`` is the
+    distance from that crossing point to the *nearest point of the opponent-table rectangle*
+    (clamped distance to the box ``[table_x_min, table_x_max] x [-table_y_half, table_y_half]``),
+    so a ball that lands just short / off the table still gets a smooth terminal gradient toward
+    a real return. Replaces the per-step ``post_hit_landing_prediction`` dense term. ``target_x``
+    is accepted for cfg symmetry with the placement terms but the score is box-distance based.
+    """
+    _ensure_tracker(env)
+    fired = (env._sac_step_event_mask & EVENT_TO_BIT["bad_hit"]) != 0
+    cross_x = env._sac_table_cross_x
+    cross_y = env._sac_table_cross_y
+    # Distance from the crossing point to the nearest point of the opponent-table rectangle
+    # ([table_x_min, table_x_max] x [-table_y_half, table_y_half]); zero inside the box.
+    dx = cross_x - cross_x.clamp(min=table_x_min, max=table_x_max)
+    dy = cross_y - cross_y.clamp(min=-table_y_half, max=table_y_half)
+    dist_sq = dx * dx + dy * dy
+    score = torch.exp(-sigma * dist_sq)
+    score = torch.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
+    return torch.where(fired, score, torch.zeros_like(score))
+
+
+def sac_racket_spin_penalty(env: ManagerBasedRLEnv, scale: float = 12.0) -> torch.Tensor:
+    """Tier-1/2 (``hit`` event) R_omega clean-contact penalty: racket angular speed at contact.
+
+    Fires on the ``hit`` event from the racket body angular-velocity magnitude cached at first
+    contact (``_sac_hit_racket_ang_vel``). Returns ``clamp(ang_vel / scale, 0, 1)`` -- a positive
+    magnitude that the cfg multiplies by a *negative* weight, so a fast wrist spin at contact
+    (which flattens / destabilizes the blade face and is highly sim-specific) is discouraged.
+    This is the physics-based replacement for the multiplicative center-contact gate.
+    """
+    _ensure_tracker(env)
+    fired = (env._sac_step_event_mask & EVENT_TO_BIT["hit"]) != 0
+    ang_vel = torch.nan_to_num(env._sac_hit_racket_ang_vel, nan=0.0, posinf=0.0, neginf=0.0)
+    score = (ang_vel / max(scale, 1.0e-6)).clamp(min=0.0, max=1.0)
+    return torch.where(fired, score, torch.zeros_like(score))
+
+
+def sac_flat_return(env: ManagerBasedRLEnv, ref_height: float = 1.4, band: float = 0.4) -> torch.Tensor:
+    """Tier-2 (``valid_return`` event) flatness bonus: prefer a low-arc return.
+
+    Fires on the ``valid_return`` event from the post-hit max ball height
+    (``_sac_post_hit_max_height``). Returns ``clamp((ref_height - max_height) / band, 0, 1)`` so a
+    flat drive (low apex) scores ~1 and a high lob scores ~0. Replaces the disabled
+    ``post_hit_lob_penalty`` with a positive terminal bonus instead of a dense negative penalty.
+    """
+    _ensure_tracker(env)
+    fired = (env._sac_step_event_mask & EVENT_TO_BIT["valid_return"]) != 0
+    max_height = torch.nan_to_num(env._sac_post_hit_max_height, nan=ref_height, posinf=ref_height, neginf=ref_height)
+    score = ((ref_height - max_height) / max(band, 1.0e-6)).clamp(min=0.0, max=1.0)
+    return torch.where(fired, score, torch.zeros_like(score))
+
+
 def joint_limit_margin_penalty(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

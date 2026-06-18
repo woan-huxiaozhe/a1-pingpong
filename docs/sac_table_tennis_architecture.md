@@ -99,21 +99,21 @@ Timing:
 
 ## 3. Observation
 
-The observation is kept close to real-machine feasibility. The actor receives a noisy deployment-style hit command (`p_hit`, `tau`) and recent joint-position deltas, but does not receive privileged clean intercept, clean joint velocity, or clean racket FK features.
+The observation is kept close to real-machine feasibility. The actor receives a noisy deployment-style hit command (`p_hit`, `tau`), recent joint-position deltas, and (as of the Ace refactor on `feat/sony-ace`) the FK three-piece (`racket_pos`, `racket_normal`, `ball_pos_rel_racket`); it does not receive privileged clean intercept, clean joint velocity, clean ball velocity, or clean racket velocities.
 
 Current groups:
 
 - `policy`: actor observation.
 - `critic`: critic observation.
 - `policy` is the deployment-facing actor input and must stay compatible with real robot signals.
-- `critic` is the training-only value input. It contains the full actor observation plus privileged simulator state. Actor is 51D, critic is 92D.
+- `critic` is the training-only value input. It contains the full actor observation plus privileged simulator state. Actor is 60D, critic is 92D.
 
 ### Actor Obs (`policy`)
 
 Actor dimension:
 
 ```text
-7 + 3*7 + 4*3 + 4 + 7 = 51
+7 + 3*7 + 4*3 + 4 + 3 + 3 + 3 + 7 = 60
 ```
 
 Actor terms:
@@ -124,12 +124,17 @@ Actor terms:
 | `joint_pos_delta_history` | 21 | Three recent deployable joint-position deltas: `[q_t-q_{t-1}, q_t-q_{t-2}, q_t-q_{t-3}]`. |
 | `ball_pos_history` | 12 | `K=4` ball positions in env/world frame, newest sample first. |
 | `estimated_hit_command` | 4 | Deployment-style `[p_hit_x, p_hit_y, p_hit_z, tau]` predicted at the robot strike plane with KF-like phase-dependent noise. |
+| `racket_pos` | 3 | FK paddle blade-center position in env/world frame, minus env origin. Deployable (forward kinematics from joint encoders). |
+| `racket_normal` | 3 | FK racket local +Y normal rotated into world frame. Deployable. |
+| `ball_pos_rel_racket` | 3 | Ball position relative to the paddle blade center. TODO: currently uses the clean ball state; switch to the actor's noised ball signal once ball noise is injected. |
 | `last_action` | 7 | Previous normalized action from the action manager. |
+
+Actor FK three-piece rationale (Ace refactor): `racket_pos`, `racket_normal`, and `ball_pos_rel_racket` were moved up from critic-only to the actor because they are FK-derived geometry the real robot can compute exactly from joint encoders, so they are deployable, not privileged. Clean ball/racket *velocities* and the clean intercept command stay critic-only. This raised the actor from 51D to 60D; the critic total is unchanged at 92D (the same three terms simply moved from the critic-private block into the inherited actor block). The actor obs dimension change invalidates pre-Ace checkpoints; the reward refactor already requires retraining from scratch, so there is no extra cost.
 
 Actor exclusions:
 
 - No clean simulator `joint_vel`.
-- No clean `racket_pos`, `racket_normal`, or racket velocity.
+- No clean racket velocity (`racket_vel`, `racket_ang_vel`) or relative ball velocity.
 - No clean `predicted_hit_point` or clean `time_to_intercept`.
 - No explicit `ball_vel`; the actor can infer ball velocity from `ball_pos_history`.
 
@@ -147,20 +152,17 @@ Actor details:
 Critic dimension:
 
 ```text
-51 actor dims + 41 privileged dims = 92
+60 actor dims + 32 critic-private privileged dims = 92
 ```
 
-Critic includes every actor term above, plus:
+Critic includes every actor term above (including the FK three-piece `racket_pos`, `racket_normal`, `ball_pos_rel_racket`, which it now inherits rather than declaring), plus these critic-private privileged terms:
 
 | Term | Dim | Meaning |
 | --- | ---: | --- |
 | `joint_vel` | 7 | Clean simulator right-arm joint velocity. |
-| `racket_pos` | 3 | Clean FK paddle blade-center position in env/world frame, minus env origin. |
-| `racket_normal` | 3 | Clean FK racket local +Y normal rotated into world frame. |
 | `ball_vel` | 3 | Clean simulator ball linear velocity. |
 | `racket_vel` | 3 | Clean paddle blade-center linear velocity. |
 | `racket_ang_vel` | 3 | Clean racket body angular velocity. |
-| `ball_pos_rel_racket` | 3 | Clean ball position relative to the paddle blade center. |
 | `ball_vel_rel_racket` | 3 | Clean ball velocity relative to the paddle blade center velocity. |
 | `racket_axes` | 9 | Clean FK racket local X/Y/Z axes in world frame. |
 | `groundtruth_hit_command` | 4 | Clean simulator `[p_hit_x, p_hit_y, p_hit_z, tau]` at the fixed strike plane. |
@@ -233,43 +235,48 @@ Joint targets are clamped by the action term. Joint-limit termination is current
 
 ## 5. Reward
 
-IsaacLab reward terms are configured in `RewardsCfg`. In practice, the event weights were scaled by `1 / 0.02 = 50` so that after 20 ms reward integration they behave like the intended sparse bonuses:
+IsaacLab reward terms are configured in `RewardsCfg`. As of the Ace refactor (`feat/sony-ace`), the reward is a **mutually-exclusive three-tier terminal ladder** plus a fixed set of sim-to-real smoothing regularizers. Almost every shaping term now fires **once on its event step** (via `_sac_step_event_mask` bit gating) using a cached quantity, instead of accumulating per step. The IsaacLab `RewardManager` multiplies each weight by `step_dt = 0.02`, so the "effective" per-event value is `weight * 0.02`; equivalently `weight = effective / 0.02`.
 
-- hit: about `+0.04`.
-- quality hit: up to `+0.20`.
-- centered hit: up to `+0.16`.
-- return/cross-net: about `+0.30`.
-- valid return: about `+0.50`.
-- landing placement: up to `+0.50`.
-- miss: about `-0.10`.
-- bad hit: about `-0.06`.
+Design intent (borrowed from Sony "Ace", Nature 2026): structure, not term count. Three mutually-exclusive outcome groups, one terminal guidance term per group, a monotone ladder so a better outcome always dominates, clean contact enforced by a *physical* quantity (racket angular speed at contact) instead of a geometric center gate, and all exploration guidance removed from the reward (left to OU noise / seeding / event replay, see Roadmap). The `miss` outcome is a small positive approach bonus rather than a negative penalty, so the policy is never incentivized to end an episode early to dodge a penalty.
 
-Current reward terms:
+The ladder does not overlap: `tier0 <= +0.10  <  tier1 const +0.30 (tier1 cap ~+0.50)  <  tier2 const +1.00`.
 
-| Term | Weight | Effective one-step scale at 20 ms | Meaning |
-| --- | ---: | ---: | --- |
-| `racket_ball_proximity` | `0.0` | disabled | Pre-hit dense racket-ball distance shaping. Kept only as an ablation hook because the 260k resume showed it correlated with misses rather than useful returns. |
-| `racket_approach` | `0.0` | disabled | Pre-hit racket closing-speed shaping. Kept only as an ablation hook. |
-| `racket_face_target` | `0.0` | disabled | Pre-hit racket-normal alignment shaping. Kept only as an ablation hook. |
-| `racket_normal_swing` | `0.0` | disabled | Pre-hit racket-normal swing-speed shaping. Kept only as an ablation hook. |
-| `hit` | `2.0` | `+0.04` | Step event reward when first racket contact is detected. Kept small so passive contact is not enough. |
-| `quality_hit` | `20.0` | up to `+0.40` | First-hit basic outgoing-quality reward. It ramps outgoing x speed from `1.5 -> 3.5 m/s` and uses only a shallow vertical gate (`up_speed -0.2 -> +0.2 m/s`) so downward hits get little/no credit. The base score is multiplied by the per-hit centering gate (`center_sigma = 400`, `center_gate_floor = 0.15`) so a blade-edge contact cannot collect the full reward. |
-| `hit_centered` | `8.0` | up to `+0.16` | First-hit event reward from the cached in-plane offset between ball and blade center (`exp(-400 * d_plane^2)`), separated from speed quality so center contact is not diluted by trajectory terms. |
-| `return_cross_net` | `15.0` | `+0.30` | Step event reward when a hit ball crosses the net toward the opponent side above net height. |
-| `valid_return` | `25.0` | `+0.50` | Step event reward when a hit ball lands on the opponent table. |
-| `landing_placement` | `25.0` | up to `+0.50` | Valid-return event reward for actual landing near the opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`), multiplied by the per-hit centering gate (`center_sigma = 400`, `center_gate_floor = 0.15`). This is the largest center-blind term an edge hit could farm, so gating it is the high-leverage half of the center-contact fix. |
-| `miss` | `-5.0` | `-0.10` | Penalty when the ball passes the robot or falls before any hit. |
-| `bad_hit` | `-3.0` | `-0.06` | Penalty when a hit ball lands on own table or goes out/falls after hit, or fails to cross the net within the hit-to-return timeout. |
-| `post_hit_outgoing` | `0.0` | disabled | Kept as an ablation hook. Disabled because it duplicated `quality_hit` and `post_hit_landing_prediction` once valid returns became common. |
-| `post_hit_net_progress` | `0.0` | disabled | Kept as an ablation hook; disabled because it rewarded shallow progress toward the net without placement quality. |
-| `post_hit_net_clearance` | `1.0` | up to `0.02` per step | After hit, rewards predicted net clearance enough to preserve crossing gradient without dominating total reward. |
-| `post_hit_landing_prediction` | `5.0` | up to `0.10` per step | After hit, predicts landing `x/y` at table height and scores proximity to opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`) only if predicted landing is in bounds. |
-| `post_hit_lob_penalty` | `0.0` | disabled | Kept as an ablation hook only. The 2026-06-16 resume showed direct high-arc penalty was too blunt: it lowered height slightly but also reduced return success. Prefer shaping target placement and center contact first. |
-| `action_rate` | `-0.005` | regularizer | Penalizes action changes. |
-| `joint_acc` | `-1e-6` | regularizer | Penalizes joint acceleration. |
-| `joint_limit` | `-1.0` | barrier regularizer | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
+| Tier | Event | Term | Func | Weight | Effective | Meaning |
+| --- | --- | --- | --- | ---: | ---: | --- |
+| 0 miss | `miss` | `miss_approach` | `sac_miss_approach` | `5.0` | `0 -> +0.10` | `exp(-sigma * min_dist^2)` on the terminal closest racket-ball distance (`sigma = 8.0`). Replaces the old `-0.10` miss penalty and the disabled pre-hit shaping; gives a chase gradient without a negative reward. |
+| 1 hit, no return | `hit` | `hit_bonus` | `sac_event_reward(event="hit")` | `15.0` | `+0.30` | Ladder constant for making any clean contact. |
+| 1 | `bad_hit` | `table_proximity` | `sac_table_proximity` | `10.0` | `0 -> +0.20` | `exp(-sigma * d^2)` where `d` is the distance from the cached first post-hit table-height crossing (`_sac_table_cross_x/y`) to the nearest point of the opponent-table rectangle (`sigma = 8.0`). Terminal bootstrap replacing the per-step `post_hit_landing_prediction`. |
+| 1/2 | `hit` | `racket_spin_penalty` (R_omega) | `sac_racket_spin_penalty` | `-5.0` | `0 -> -0.10` | `clamp(racket_ang_vel_at_contact / scale, 0, 1)` (`scale = 12.0` rad/s). Physical clean-contact term replacing the entire center-gate subsystem; fires once on the hit event so it is shared across the bad_hit and valid_return outcomes of that hit. |
+| 2 valid return | `valid_return` | `return_bonus` | `sac_event_reward(event="valid_return")` | `50.0` | `+1.00` | Top ladder constant, far above the tier-1 cap. |
+| 2 | `valid_return` | `landing_placement` | `sac_landing_placement` | `25.0` | `0 -> +0.50` | Gaussian on actual landing vs opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`). **No center gate** (`center_sigma`/`center_gate_floor` left at default `0`). |
+| 2 | `valid_return` | `flat_return` | `sac_flat_return` | `10.0` | `0 -> +0.20` | `clamp((ref_height - post_hit_max_height) / band, 0, 1)` (`ref_height = 1.4 m`, `band = 0.4 m`): a flat drive scores high, a lob scores 0. Positive-terminal replacement for the disabled `post_hit_lob_penalty`. |
+| reg | every step | `action_rate` | `action_rate_l2` | `-0.03` | regularizer | Penalizes action changes. |
+| reg | every step | `joint_acc` | `joint_acc_l2` | `-2e-5` | regularizer | Penalizes joint acceleration. |
+| reg | every step | `joint_jerk` | `joint_jerk_l2` | `-5e-9` | regularizer | Penalizes joint jerk (single-step acceleration reversals). |
+| reg | every step | `joint_limit` | `joint_limit_margin_penalty` | `-3.0` | barrier | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
+| reg | every step | `joint_effort_margin` | `joint_effort_margin_penalty` | `-3.0` | barrier | Penalizes torques approaching `85%` of each joint's effort limit. |
 
-The earlier pre-hit `racket_forward_push` term was removed because fixed world-x end-effector push encouraged wrist-pitch limit-seeking. The later pre-hit shaping terms (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) are now disabled by default: after the policy can already contact the ball, the 260k resume showed these terms mostly rewarded chasing/posing near the ball and correlated with misses, not valid returns. Pure `hit` is intentionally small; `quality_hit` now only checks that first contact has enough outgoing velocity and is not hit downward. Center contact is handled by `hit_centered` plus a multiplicative centering gate on `quality_hit` and `landing_placement`; final placement is handled by `post_hit_landing_prediction` and `landing_placement`.
+Unwired terms (function bodies kept in `rewards.py` as ablation hooks; only the `RewardsCfg` wiring is commented out, per repo convention) and why:
+
+| Unwired term | Old weight | Why removed |
+| --- | ---: | --- |
+| `hit` (small const) | `2.0` | Subsumed by the tier-1 `hit_bonus` (`15.0`). |
+| `quality_hit` | `20.0` | Outgoing-speed + vertical gate is now implicit: the only way to earn the much larger return ladder is a returnable hit, so a separate speed-quality term is redundant and was a hack surface. |
+| `hit_centered` | `8.0` | Center contact is now enforced physically by `racket_spin_penalty`, not by an additive center bonus. |
+| `return_cross_net` | `15.0` | Net-crossing is a strict subset of `valid_return`; rewarding it separately double-counted and let a ball that crossed but did not land farm reward. |
+| `valid_return` (old wiring) | `25.0` | Re-wired as `return_bonus` at the higher top-of-ladder constant (`50.0`). |
+| `landing_placement` (center-gated) | `25.0` | Re-wired identically but with the multiplicative center gate removed. |
+| `miss` (penalty) | `-5.0` | Replaced by the positive `miss_approach`; negative outcome penalties invite early-termination exploits (repo history saw a joint-limit termination exploit). |
+| `bad_hit` (penalty) | `-3.0` | Replaced by the positive `table_proximity` bootstrap; the ladder is driven by constants, not penalties. |
+| `post_hit_net_clearance` | `1.0` | Per-step dense predictor that dominated `reward/total_mean` with noise; replaced by the terminal `table_proximity`. |
+| `post_hit_landing_prediction` | `5.0` | Same: per-step dense predictor replaced by terminal `table_proximity`. |
+| pre-hit shaping (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) | `0.0` | Already disabled pre-Ace; exploration guidance is intentionally not in the reward. |
+
+Center-gate -> R_omega migration. Through 2026-06-11/16/18 the team repeatedly retuned a multiplicative center-contact gate (`_center_gate_factor`, `SAC_CENTER_SIGMA = 400`, `SAC_CENTER_GATE_FLOOR = 0.15`) on `quality_hit` and `landing_placement`, plus an additive `hit_centered` term, yet `hit_center_offset_mean` stayed stuck at ~7.6 cm and the policy showed converged-but-oscillating behaviour (`docs/sac_catch_oscillation_diagnosis.md`). The Ace refactor replaces the whole gate subsystem with `racket_spin_penalty` (R_omega): a fast wrist spin at contact is what destabilizes a clean, flat blade face and is highly sim-specific, so penalizing the cached racket angular speed at first contact targets the *cause* of dirty edge contact with a smooth physical gradient rather than a multiplicative geometric cliff. `SAC_CENTER_SIGMA` / `SAC_CENTER_GATE_FLOOR` remain defined in `env_cfg.py` for the disabled center terms but are not referenced by any active reward. `hit_center_offset` is still cached and logged as a diagnostic metric (it does not enter the reward).
+
+The historical retune notes below are retained for context; they describe the pre-Ace additive/gated reward that the three-tier ladder replaced.
+
+
 
 2026-06-11 retune (fix "hit but never return" / weak-swing / handle-contact). The previous run converged to `hit_rate = 1.0`, `return_rate = 0.0`, `bad_hit_rate = 1.0`: every episode hit the ball but gently (outgoing x speed parked at ~2.1 m/s) and was force-ended as `bad_hit` at the hit-to-return timeout. Three coupled causes were addressed:
 
