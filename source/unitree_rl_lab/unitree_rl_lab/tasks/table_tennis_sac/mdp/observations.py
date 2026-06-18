@@ -195,43 +195,79 @@ def estimated_hit_command_at_robot_x(
     ball_name: str,
     robot_x: float,
     robot_side: int,
-    position_noise_std_near: float = 0.01,
-    position_noise_std_far: float = 0.03,
-    tau_noise_std_near: float = 0.002,
-    tau_noise_std_far: float = 0.015,
-    far_tau: float = 0.8,
+    bias_std_far: tuple[float, float, float] = (0.024, 0.022, 0.016),
+    jitter_std: tuple[float, float, float] = (0.003, 0.008, 0.003),
+    fixed_offset_far: tuple[float, float, float] = (0.0, -0.010, -0.005),
+    far_tau: tuple[float, float, float] = (0.65, 0.40, 0.55),
     y_abs_limit: float = 2.0,
     z_min: float = 0.45,
     z_max: float = 2.0,
 ) -> torch.Tensor:
     """Deployment-style hit command with KF-like prediction error.
 
-    The clean simulator prediction is cached with phase-dependent Gaussian error so the
-    actor and critic see the same deployed command when both groups are evaluated in the
-    same policy step. The strike-plane x coordinate stays fixed at ``robot_x``; noise is
-    applied to predicted y/z and time-to-strike.
+    Calibrated from the deployment Kalman (``kalman_filter_pingpong``) open-loop hit-point
+    residuals on the 0617 mocap serves. The real KF error is dominated by a *per-serve
+    consistent bias* (random direction each serve, set by that ball's spin/launch that the
+    non-Magnus KF mispredicts), NOT per-step white noise -- so a per-step Gaussian (the old
+    model) would be averaged out by the policy. The three components, each scaled by the
+    per-axis horizon phase ``tau / far_tau`` so the command converges to truth as the ball
+    arrives:
+
+      - ``bias``  : per-episode unit normal (y, z, tau) drawn once per ball reset, times
+                    ``bias_std_far`` -- consistent in direction over the whole flight.
+      - ``jitter``: per-step white noise, ``jitter_std`` (small).
+      - ``offset``: fixed systematic offset ``fixed_offset_far`` shared by all serves
+                    (mainly z ~ -1cm: the KF predicts the strike height slightly low).
+
+    ``far_tau`` is per-axis because the three error profiles differ in horizon: z saturates
+    early (~0.40 s), y grows ~linearly out to ~0.65 s, tau plateaus mid-flight (~0.55 s).
+    The strike-plane x stays fixed at ``robot_x``; error is applied to predicted y/z/tau.
+    Cached per policy step so the actor and critic groups see the same command in one step.
     """
     clean = hit_command_at_robot_x(env, ball_name=ball_name, robot_x=robot_x, robot_side=robot_side)
+    num = clean.shape[0]
+    device = clean.device
+    step = env.episode_length_buf.to(torch.long)
+
+    # --- per-episode bias unit vector (y, z, tau), redrawn at episode reset ---
+    bias_attr = "_sac_hit_bias_unit"
+    bias_step_attr = "_sac_hit_bias_step"
+    if not hasattr(env, bias_attr):
+        setattr(env, bias_attr, torch.randn(num, 3, device=device))
+        setattr(env, bias_step_attr, torch.full((num,), -1, dtype=torch.long, device=device))
+    bias_unit = getattr(env, bias_attr)
+    bias_last = getattr(env, bias_step_attr)
+    reset = (bias_last < 0) | (step == 0) | (step < bias_last)
+    if torch.any(reset):
+        bias_unit[reset] = torch.randn(int(reset.sum()), 3, device=device)
+        bias_last[reset] = step[reset]
+
+    # --- per-step cached estimate (actor/critic consistency within a step) ---
     attr = "_sac_estimated_hit_command"
     step_attr = "_sac_estimated_hit_command_step"
-
     if not hasattr(env, attr):
         setattr(env, attr, clean.clone())
-        setattr(env, step_attr, torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device))
+        setattr(env, step_attr, torch.full((num,), -1, dtype=torch.long, device=device))
 
     estimate = getattr(env, attr)
     last_step = getattr(env, step_attr)
-    step = env.episode_length_buf.to(torch.long)
     refresh = step != last_step
     if torch.any(refresh):
         next_estimate = clean.clone()
-        tau = clean[:, 3:4].clamp(min=0.0)
-        phase = (tau / max(far_tau, 1.0e-6)).clamp(min=0.0, max=1.0)
-        position_std = position_noise_std_near + (position_noise_std_far - position_noise_std_near) * phase
-        tau_std = tau_noise_std_near + (tau_noise_std_far - tau_noise_std_near) * phase
+        tau = clean[:, 3:4].clamp(min=0.0)  # [N, 1]
 
-        next_estimate[:, 1:3] += torch.randn_like(next_estimate[:, 1:3]) * position_std
-        next_estimate[:, 3:4] += torch.randn_like(next_estimate[:, 3:4]) * tau_std
+        far = torch.tensor(far_tau, device=device, dtype=clean.dtype).clamp(min=1.0e-6)  # [3]
+        phase = (tau / far.unsqueeze(0)).clamp(min=0.0, max=1.0)  # [N, 3], per-axis horizon scaling
+
+        bias_std = torch.tensor(bias_std_far, device=device, dtype=clean.dtype).unsqueeze(0)  # [1, 3]
+        jit_std = torch.tensor(jitter_std, device=device, dtype=clean.dtype).unsqueeze(0)
+        offset = torch.tensor(fixed_offset_far, device=device, dtype=clean.dtype).unsqueeze(0)
+
+        # err on (y, z, tau): bias keeps its per-episode direction, magnitude scales with phase
+        err = bias_unit * (bias_std * phase) + torch.randn(num, 3, device=device) * jit_std + offset * phase
+
+        next_estimate[:, 1:3] += err[:, 0:2]  # y, z
+        next_estimate[:, 3:4] += err[:, 2:3]  # tau
         next_estimate[:, 1:2] = next_estimate[:, 1:2].clamp(-y_abs_limit, y_abs_limit)
         next_estimate[:, 2:3] = next_estimate[:, 2:3].clamp(z_min, z_max)
         next_estimate[:, 3:4] = next_estimate[:, 3:4].clamp(0.0, 3.0)

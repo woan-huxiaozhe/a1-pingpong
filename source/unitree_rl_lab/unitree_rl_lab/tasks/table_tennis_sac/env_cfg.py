@@ -28,23 +28,41 @@ SAC_ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE
 SAC_ROBOT_X = -1.47
 
 SAC_READY_LIFT_POS = -0.22
-SAC_READY_JOINT_POS = [1.53, -0.39, 1.60, -1.32, 0.0, 1.0, -1.845288]
+# SAC_READY_JOINT_POS = [1.13, -0.39, 2.00, -1.32, 0.0, 1.0, -1.845288]
+SAC_READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]
 SAC_MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]
+# Deployment KF hit-point prediction error model, calibrated from the real Kalman
+# (kalman_filter_pingpong) open-loop residuals on the 0617 mocap serves. The real error is
+# dominated by a per-serve consistent bias (random direction each serve, set by that ball's
+# spin the non-Magnus KF mispredicts), not per-step white noise -- hence the per-episode
+# bias term. Each component scales with the per-axis horizon phase tau/far_tau so the command
+# converges to truth as the ball arrives. far_tau is per-axis: z saturates early (~0.40s),
+# y grows ~linearly to ~0.65s, tau plateaus mid-flight (~0.55s). Tuples are (y, z, tau);
+# units m / m / s.
 SAC_HIT_COMMAND_NOISE = {
-    "position_noise_std_near": 0.01,
-    "position_noise_std_far": 0.03,
-    "tau_noise_std_near": 0.002,
-    "tau_noise_std_far": 0.015,
-    "far_tau": 0.8,
+    "bias_std_far": (0.024, 0.022, 0.016),
+    "jitter_std": (0.003, 0.008, 0.003),
+    "fixed_offset_far": (0.0, -0.010, -0.005),
+    "far_tau": (0.65, 0.40, 0.55),
 }
 
+# Centering reward calibration, shared by the hit/return terms (quality_hit, hit_centered,
+# landing_placement) so they cannot drift apart. The paddle blade radius is ~7.5 cm (15 cm
+# diameter), so sigma concentrates the reward in the inner ~2.5 cm and decays to near the
+# floor at the rim (offset 7.5 cm -> factor ~0.24). The earlier sigma=220 had a 1/e width of
+# 6.7 cm -- nearly the whole blade -- so it barely distinguished a center hit from a rim hit,
+# which is why both the additive term and the earlier gate left contact stuck at the rim.
+# GATE_FLOOR keeps the multiplicative gate a gradient rather than a cliff.
+SAC_CENTER_SIGMA = 400.0
+SAC_CENTER_GATE_FLOOR = 0.15
+
 SAC_FIXED_MIDDLE_BALL = {
-    "x_range": (-1.25 * ROBOT_SIDE, -1.25 * ROBOT_SIDE),
-    "y_range": (0.0, 0.0),
-    "z_range": (1.1, 1.1),
-    "vx_range": (3.4 * ROBOT_SIDE, 3.4 * ROBOT_SIDE),
+    "x_range": (-1.0 * ROBOT_SIDE, -1.0 * ROBOT_SIDE),
+    "y_range": (-0.1, 0.3),
+    "z_range": (1.1, 1.2),
+    "vx_range": (4.0 * ROBOT_SIDE, 5.0 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
-    "vz_range": (2.0, 2.0),
+    "vz_range": (1.0, 1.5),
 }
 
 
@@ -129,80 +147,84 @@ class ObservationsCfg:
 
 @configclass
 class RewardsCfg:
-    racket_ball_proximity = RewTerm(
-        func=mdp.racket_ball_proximity_dense,
-        weight=0.8,
-        params={"ball_name": "ball", "racket_body_name": RACKET_BODY_NAME, "sigma": 12.0},
-    )
-    racket_approach = RewTerm(
-        func=mdp.racket_approach_ball,
-        weight=1.2,
-        params={"ball_name": "ball", "racket_body_name": RACKET_BODY_NAME, "target_vel": 2.0},
-    )
-    racket_face_target = RewTerm(
-        func=mdp.racket_face_toward_target,
-        weight=0.3,
-        params={
-            "ball_name": "ball",
-            "racket_body_name": RACKET_BODY_NAME,
-            "target_x": OPP_TABLE_CENTER_X,
-            "target_z": TABLE_Z,
-            "launch_speed": 4.5,
-            "proximity_gate": 0.55,
-        },
-    )
-    racket_normal_swing = RewTerm(
-        func=mdp.racket_normal_swing_velocity,
-        weight=1.0,
-        params={
-            "ball_name": "ball",
-            "racket_body_name": RACKET_BODY_NAME,
-            "target_x": OPP_TABLE_CENTER_X,
-            "target_z": TABLE_Z,
-            "launch_speed": 4.5,
-            "target_speed": 2.5,
-            "proximity_gate": 0.45,
-        },
-    )
+    # racket_ball_proximity = RewTerm(
+    #     func=mdp.racket_ball_proximity_dense,
+    #     weight=0.0,
+    #     params={"ball_name": "ball", "racket_body_name": RACKET_BODY_NAME, "sigma": 12.0},
+    # )
+    # racket_approach = RewTerm(
+    #     func=mdp.racket_approach_ball,
+    #     weight=0.0,
+    #     params={"ball_name": "ball", "racket_body_name": RACKET_BODY_NAME, "target_vel": 2.0},
+    # )
+    # racket_face_target = RewTerm(
+    #     func=mdp.racket_face_toward_target,
+    #     weight=0.0,
+    #     params={
+    #         "ball_name": "ball",
+    #         "racket_body_name": RACKET_BODY_NAME,
+    #         "target_x": OPP_TABLE_CENTER_X,
+    #         "target_z": TABLE_Z,
+    #         "launch_speed": 4.5,
+    #         "proximity_gate": 0.55,
+    #     },
+    # )
+    # racket_normal_swing = RewTerm(
+    #     func=mdp.racket_normal_swing_velocity,
+    #     weight=0.0,
+    #     params={
+    #         "ball_name": "ball",
+    #         "racket_body_name": RACKET_BODY_NAME,
+    #         "target_x": OPP_TABLE_CENTER_X,
+    #         "target_z": TABLE_Z,
+    #         "launch_speed": 4.5,
+    #         "target_speed": 2.5,
+    #         "proximity_gate": 0.45,
+    #     },
+    # )
     hit = RewTerm(func=mdp.sac_event_reward, weight=2.0, params={"event": "hit"})
     quality_hit = RewTerm(
         func=mdp.sac_quality_hit_reward,
-        weight=6.0,
+        weight=20.0,
         params={
-            "ball_name": "ball",
-            "racket_body_name": RACKET_BODY_NAME,
-            "target_outgoing_speed": 3.5,
-            "min_up_speed": 0.2,
-            "target_up_speed": 1.0,
-            "over_up_speed": 2.0,
-            "outgoing_weight": 0.85,
-            "up_weight": 0.15,
-            "center_sigma": 60.0,
-            "center_floor": 0.15,
+            "min_outgoing_speed": 1.5,
+            "good_outgoing_speed": 3.5,
+            "min_up_speed": -0.2,
+            "up_tolerance": 0.4,
+            "center_sigma": SAC_CENTER_SIGMA,
+            "center_gate_floor": SAC_CENTER_GATE_FLOOR,
         },
     )
+    hit_centered = RewTerm(func=mdp.sac_centered_hit_reward, weight=8.0, params={"sigma": SAC_CENTER_SIGMA})
     return_cross_net = RewTerm(func=mdp.sac_event_reward, weight=15.0, params={"event": "return"})
     valid_return = RewTerm(func=mdp.sac_event_reward, weight=25.0, params={"event": "valid_return"})
     landing_placement = RewTerm(
         func=mdp.sac_landing_placement,
-        weight=10.0,
-        params={"target_x": OPP_TABLE_CENTER_X, "target_y": 0.0, "sigma_x": 0.35, "sigma_y": 0.4},
+        weight=25.0,
+        params={
+            "target_x": OPP_TABLE_CENTER_X,
+            "target_y": 0.0,
+            "sigma_x": 0.25,
+            "sigma_y": 0.3,
+            "center_sigma": SAC_CENTER_SIGMA,
+            "center_gate_floor": SAC_CENTER_GATE_FLOOR,
+        },
     )
     miss = RewTerm(func=mdp.sac_miss_penalty, weight=-5.0)
     bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-3.0)
-    post_hit_outgoing = RewTerm(
-        func=mdp.post_hit_outgoing_velocity,
-        weight=1.0,
-        params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_speed": 3.5},
-    )
-    post_hit_net_progress = RewTerm(
-        func=mdp.post_hit_net_progress,
-        weight=0.5,
-        params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": SAC_ROBOT_X},
-    )
+    # post_hit_outgoing = RewTerm(
+    #     func=mdp.post_hit_outgoing_velocity,
+    #     weight=0.0,
+    #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_speed": 3.5},
+    # )
+    # post_hit_net_progress = RewTerm(
+    #     func=mdp.post_hit_net_progress,
+    #     weight=0.0,
+    #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": SAC_ROBOT_X},
+    # )
     post_hit_net_clearance = RewTerm(
         func=mdp.post_hit_net_clearance,
-        weight=4.0,
+        weight=1.0,
         params={"ball_name": "ball", "robot_side": ROBOT_SIDE},
     )
     post_hit_landing_prediction = RewTerm(
@@ -212,22 +234,47 @@ class RewardsCfg:
             "ball_name": "ball",
             "robot_side": ROBOT_SIDE,
             "target_x": OPP_TABLE_CENTER_X,
+            "target_y": 0.0,
             "table_x_min": OPP_TABLE_X[0],
             "table_x_max": OPP_TABLE_X[1],
+            "table_y_half": 0.7625,
             "table_z": TABLE_Z,
-            "sigma_x": 0.5,
+            "sigma_x": 0.25,
+            "sigma_y": 0.3,
         },
     )
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
+    # post_hit_lob_penalty = RewTerm(
+    #     func=mdp.post_hit_lob_penalty,
+    #     weight=0.0,
+    #     params={
+    #         "ball_name": "ball",
+    #         "robot_side": ROBOT_SIDE,
+    #         "max_height": 1.25,
+    #         "height_band": 0.35,
+    #         "max_up_speed": 1.6,
+    #         "up_speed_band": 1.2,
+    #     },
+    # )
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.03)
     joint_acc = RewTerm(
         func=mdp.joint_acc_l2,
-        weight=-1.0e-6,
+        weight=-2.0e-5,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
+    )
+    joint_jerk = RewTerm(
+        func=mdp.joint_jerk_l2,
+        weight=-5.0e-9,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
     )
     joint_limit = RewTerm(
         func=mdp.joint_limit_margin_penalty,
-        weight=-1.0,
+        weight=-3.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin": 0.20},
+    )
+    joint_effort_margin = RewTerm(
+        func=mdp.joint_effort_margin_penalty,
+        weight=-3.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin_frac": 0.85},
     )
 
 

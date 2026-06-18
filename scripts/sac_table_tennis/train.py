@@ -41,6 +41,37 @@ parser.add_argument(
     action="store_true",
     help="Warm-start only the actor and alpha from checkpoint; initialize critics for the current observation shape.",
 )
+parser.add_argument(
+    "--reward_weight_override",
+    type=str,
+    default=None,
+    help="Comma-separated term=weight overrides applied to env_cfg.rewards before env creation, "
+    "e.g. 'racket_approach=0,racket_ball_proximity=0'. For reward-ablation experiments; "
+    "does not alter the default config.",
+)
+parser.add_argument(
+    "--min_alpha_override",
+    type=float,
+    default=None,
+    help="Override SAC entropy-temperature floor (config.min_alpha) after agent creation/resume. "
+    "For entropy-floor ablation; on resume this supersedes the value stored in the checkpoint.",
+)
+parser.add_argument(
+    "--eval_interval",
+    type=int,
+    default=10_000,
+    help="Run a deterministic (greedy) eval every N updates and save the best checkpoint "
+    "(agent_best.pt) by eval valid_return_rate. 0 disables eval/best-checkpoint selection. "
+    "Decouples the deployed policy from the persistent valid_return oscillation: the periodic "
+    "interval/final checkpoints can land in a bad-hit storm trough, agent_best.pt cannot.",
+)
+parser.add_argument(
+    "--eval_steps",
+    type=int,
+    default=150,
+    help="Control steps per deterministic eval rollout (>= one episode_length so every env "
+    "completes at least one greedy episode). Episode length is ~125 steps at the default dt.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -84,6 +115,9 @@ def _make_log_dir() -> str:
 
 EPISODE_METRICS = (
     "min_dist",
+    "landing_x",
+    "landing_y",
+    "hit_center_offset",
     "hit_outgoing_speed",
     "hit_up_speed",
     "post_hit_max_outgoing_speed",
@@ -171,6 +205,37 @@ def _log_reward_term_stats(writer, stats: dict, step: int):
         writer.add_scalar(f"reward_terms/{term_name}", value_sum * inv_steps, step)
 
 
+def run_eval(env, agent, eval_steps: int, device) -> tuple[dict, int]:
+    """Deterministic greedy rollout used for best-checkpoint selection.
+
+    Resets all envs, rolls the policy out greedily (``deterministic=True``, matching
+    deployment) for ``eval_steps`` control steps, and returns per-event episode rates over
+    the episodes that completed during the rollout. Greedy actions strip the ``min_alpha``
+    exploration noise, so even a single pass over the env's many parallel envs is a
+    low-variance estimate of true policy quality -- unlike the stochastic training
+    valid_return_rate, which oscillates on the flat reward ridge.
+
+    Does NOT touch the replay buffer or episode-trace bookkeeping; the caller must rebuild
+    the training env state afterwards so this perturbation does not leak into training.
+    """
+    obs, _ = env.reset()
+    obs_actor, _ = split_actor_critic_obs(obs)
+    stats = _new_episode_stats()
+    with torch.no_grad():
+        for _ in range(eval_steps):
+            action = agent.act(obs_actor, deterministic=True).to(device)
+            next_obs, _, terminated, truncated, _ = env.step(action)
+            done = terminated | truncated
+            _accumulate_episode_stats(stats, extract_final_episode_infos(env, done))
+            obs_actor, _ = split_actor_critic_obs(next_obs)
+    episodes = int(stats["episodes"])
+    rates = {
+        event: (stats["event_counts"][event] / episodes if episodes > 0 else 0.0)
+        for event in EVENT_TAGS
+    }
+    return rates, episodes
+
+
 def main():
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
@@ -184,6 +249,20 @@ def main():
         entry_point_key="env_cfg_entry_point",
     )
     env_cfg.seed = args_cli.seed
+
+    if args_cli.reward_weight_override:
+        for pair in args_cli.reward_weight_override.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            name, _, raw = pair.partition("=")
+            name = name.strip()
+            term = getattr(env_cfg.rewards, name, None)
+            if term is None:
+                raise ValueError(f"--reward_weight_override: unknown reward term '{name}'")
+            new_w = float(raw)
+            print(f"[INFO] reward override: {name} weight {term.weight} -> {new_w}")
+            term.weight = new_w
 
     log_dir = _make_log_dir()
     os.makedirs(os.path.join(log_dir, "params"), exist_ok=True)
@@ -242,6 +321,18 @@ def main():
             config=SACConfig(),
             device=device,
         )
+
+    if args_cli.min_alpha_override is not None:
+        new_floor = float(args_cli.min_alpha_override)
+        old_floor = agent.config.min_alpha
+        agent.config.min_alpha = new_floor
+        agent._min_log_alpha = math.log(new_floor) if new_floor > 0.0 else None
+        agent._clamp_log_alpha()
+        print(
+            f"[INFO] min_alpha override: {old_floor} -> {new_floor} "
+            f"(current alpha={float(agent.alpha.detach().cpu()):.4f})"
+        )
+
     replay = UniformReplayBuffer(args_cli.replay_size, device="cpu")
     event_tables = make_event_tables(args_cli.event_table_size)
     sampler = StratifiedReplaySampler(replay, event_tables)
@@ -251,6 +342,7 @@ def main():
 
     global_transitions = 0
     update_count = resume_step
+    best_valid_return = float("-inf")
     last_losses: dict[str, float] = {}
     episode_stats = _new_episode_stats()
     reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
@@ -337,6 +429,36 @@ def main():
                 if update_count % args_cli.checkpoint_interval == 0:
                     ckpt = os.path.join(log_dir, "checkpoints", f"agent_{update_count:07d}.pt")
                     agent.save(ckpt, step=update_count)
+
+                if args_cli.eval_interval > 0 and update_count % args_cli.eval_interval == 0:
+                    eval_rates, eval_episodes = run_eval(env, agent, args_cli.eval_steps, device)
+                    eval_vr = eval_rates.get("valid_return", 0.0)
+                    improved = eval_episodes > 0 and eval_vr > best_valid_return
+                    if improved:
+                        best_valid_return = eval_vr
+                        best_ckpt = os.path.join(log_dir, "checkpoints", "agent_best.pt")
+                        agent.save(best_ckpt, step=update_count)
+                    if writer is not None:
+                        for event in EVENT_TAGS:
+                            writer.add_scalar(f"eval/{event}_rate", eval_rates[event], update_count)
+                        writer.add_scalar("eval/episodes", eval_episodes, update_count)
+                        if best_valid_return > float("-inf"):
+                            writer.add_scalar("eval/best_valid_return_rate", best_valid_return, update_count)
+                    print(
+                        f"[EVAL] update={update_count} episodes={eval_episodes} "
+                        f"valid_return={eval_vr:.3f} hit={eval_rates['hit']:.3f} "
+                        f"bad_hit={eval_rates['bad_hit']:.3f} best={best_valid_return:.3f}"
+                        + ("  <- saved agent_best.pt" if improved else "")
+                    )
+                    # The eval rollout reset and stepped the env under greedy actions; rebuild
+                    # a clean training state so the deterministic perturbation does not leak
+                    # into the replay buffer / episode-trace bookkeeping.
+                    obs, _ = env.reset()
+                    obs_actor, obs_critic = split_actor_critic_obs(obs)
+                    traces = EpisodeTraceBuffer(num_envs)
+                    episode_steps = torch.zeros(num_envs, dtype=torch.long)
+                    episode_stats = _new_episode_stats()
+                    reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
 
                 if update_count >= args_cli.max_updates:
                     break

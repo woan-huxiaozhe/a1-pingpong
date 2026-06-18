@@ -1,6 +1,6 @@
 # A1 Table Tennis SAC Training Architecture
 
-Last updated: 2026-06-12
+Last updated: 2026-06-17
 
 This document is the architecture note for the independent SAC table-tennis pipeline. When the SAC task's observation, action, reward, replay, event logic, latency model, training loop, or TensorBoard logging changes, update this file in the same change.
 
@@ -235,34 +235,41 @@ Joint targets are clamped by the action term. Joint-limit termination is current
 
 IsaacLab reward terms are configured in `RewardsCfg`. In practice, the event weights were scaled by `1 / 0.02 = 50` so that after 20 ms reward integration they behave like the intended sparse bonuses:
 
-- hit: about `+0.2`.
-- quality hit: up to `+1.2`.
-- return/cross-net: about `+4`.
-- valid return: about `+8`.
-- miss: about `-1`.
-- bad hit: about `-0.8`.
+- hit: about `+0.04`.
+- quality hit: up to `+0.20`.
+- centered hit: up to `+0.16`.
+- return/cross-net: about `+0.30`.
+- valid return: about `+0.50`.
+- landing placement: up to `+0.50`.
+- miss: about `-0.10`.
+- bad hit: about `-0.06`.
 
 Current reward terms:
 
 | Term | Weight | Effective one-step scale at 20 ms | Meaning |
 | --- | ---: | ---: | --- |
-| `racket_ball_proximity` | `0.4` | up to `0.008` | Dense `exp(-12 * distance^2)` between racket (blade center) and ball. |
-| `racket_approach` | `0.4` | up to `0.008` | Racket closing speed toward the ball, **monotonic up to `target_vel = 3.0 m/s`** then saturating. No penalty for faster swings (replaces the earlier Gaussian peaked at 1 m/s, which capped hit strength). |
-| `racket_face_target` | `0.3` | up to `0.006` | Before hit, when the ball is near, rewards racket normal alignment toward the target landing region. |
-| `racket_normal_swing` | `0.6` | up to `0.012` | Before hit, rewards racket velocity along the racket normal (`target_speed = 3.0 m/s`), gated by face-target alignment. |
-| `hit` | `10.0` | `+0.2` | Step event reward when first racket contact is detected. Kept small so passive contact is not enough. |
-| `quality_hit` | `60.0` | up to `+1.2` | First-hit reward from hit-time outgoing x speed (**saturates at `target_outgoing_speed = 5.5 m/s`**) and upward speed, then multiplied by a contact-**centeredness** factor (`center_floor 0.4 .. 1.0`, `exp(-25 * d_center^2)`) so a blade-center hit pays more than an edge/handle hit. |
-| `return_cross_net` | `200.0` | `+4.0` | Step event reward when a hit ball crosses the net toward the opponent side above net height. |
-| `valid_return` | `400.0` | `+8.0` | Step event reward when a hit ball lands on the opponent table. |
-| `miss` | `-50.0` | `-1.0` | Penalty when the ball passes the robot or falls before any hit. |
-| `bad_hit` | `-40.0` | `-0.8` | Penalty when a hit ball lands on own table or goes out/falls after hit, or fails to cross the net within the hit-to-return timeout. |
-| `post_hit_outgoing` | `3.0` | up to `0.06` per step | After hit, encourages positive outgoing x velocity toward the opponent side (`target_speed = 5.0 m/s`). |
-| `post_hit_lift` | `1.0` | up to `0.02` per step | After hit and before return, encourages upward velocity. |
-| `action_rate` | `-0.02` | regularizer | Penalizes action changes. |
+| `racket_ball_proximity` | `0.0` | disabled | Pre-hit dense racket-ball distance shaping. Kept only as an ablation hook because the 260k resume showed it correlated with misses rather than useful returns. |
+| `racket_approach` | `0.0` | disabled | Pre-hit racket closing-speed shaping. Kept only as an ablation hook. |
+| `racket_face_target` | `0.0` | disabled | Pre-hit racket-normal alignment shaping. Kept only as an ablation hook. |
+| `racket_normal_swing` | `0.0` | disabled | Pre-hit racket-normal swing-speed shaping. Kept only as an ablation hook. |
+| `hit` | `2.0` | `+0.04` | Step event reward when first racket contact is detected. Kept small so passive contact is not enough. |
+| `quality_hit` | `20.0` | up to `+0.40` | First-hit basic outgoing-quality reward. It ramps outgoing x speed from `1.5 -> 3.5 m/s` and uses only a shallow vertical gate (`up_speed -0.2 -> +0.2 m/s`) so downward hits get little/no credit. The base score is multiplied by the per-hit centering gate (`center_sigma = 400`, `center_gate_floor = 0.15`) so a blade-edge contact cannot collect the full reward. |
+| `hit_centered` | `8.0` | up to `+0.16` | First-hit event reward from the cached in-plane offset between ball and blade center (`exp(-400 * d_plane^2)`), separated from speed quality so center contact is not diluted by trajectory terms. |
+| `return_cross_net` | `15.0` | `+0.30` | Step event reward when a hit ball crosses the net toward the opponent side above net height. |
+| `valid_return` | `25.0` | `+0.50` | Step event reward when a hit ball lands on the opponent table. |
+| `landing_placement` | `25.0` | up to `+0.50` | Valid-return event reward for actual landing near the opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`), multiplied by the per-hit centering gate (`center_sigma = 400`, `center_gate_floor = 0.15`). This is the largest center-blind term an edge hit could farm, so gating it is the high-leverage half of the center-contact fix. |
+| `miss` | `-5.0` | `-0.10` | Penalty when the ball passes the robot or falls before any hit. |
+| `bad_hit` | `-3.0` | `-0.06` | Penalty when a hit ball lands on own table or goes out/falls after hit, or fails to cross the net within the hit-to-return timeout. |
+| `post_hit_outgoing` | `0.0` | disabled | Kept as an ablation hook. Disabled because it duplicated `quality_hit` and `post_hit_landing_prediction` once valid returns became common. |
+| `post_hit_net_progress` | `0.0` | disabled | Kept as an ablation hook; disabled because it rewarded shallow progress toward the net without placement quality. |
+| `post_hit_net_clearance` | `1.0` | up to `0.02` per step | After hit, rewards predicted net clearance enough to preserve crossing gradient without dominating total reward. |
+| `post_hit_landing_prediction` | `5.0` | up to `0.10` per step | After hit, predicts landing `x/y` at table height and scores proximity to opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`) only if predicted landing is in bounds. |
+| `post_hit_lob_penalty` | `0.0` | disabled | Kept as an ablation hook only. The 2026-06-16 resume showed direct high-arc penalty was too blunt: it lowered height slightly but also reduced return success. Prefer shaping target placement and center contact first. |
+| `action_rate` | `-0.005` | regularizer | Penalizes action changes. |
 | `joint_acc` | `-1e-6` | regularizer | Penalizes joint acceleration. |
-| `joint_limit` | `-2.0` | barrier regularizer | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
+| `joint_limit` | `-1.0` | barrier regularizer | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
 
-The earlier pre-hit `racket_forward_push` term was removed because fixed world-x end-effector push encouraged wrist-pitch limit-seeking. The current pre-hit shaping separates approach, face alignment, and racket-normal swing speed, which is a better fit for an articulated arm than a single-direction Cartesian push. Pure `hit` is intentionally small; `quality_hit` carries most of the contact bonus and pays only when first contact gives the ball outgoing velocity and some upward velocity. Post-hit shaping remains to make early hits send the ball away from the robot and high enough to clear the net before sparse `return` events become common.
+The earlier pre-hit `racket_forward_push` term was removed because fixed world-x end-effector push encouraged wrist-pitch limit-seeking. The later pre-hit shaping terms (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) are now disabled by default: after the policy can already contact the ball, the 260k resume showed these terms mostly rewarded chasing/posing near the ball and correlated with misses, not valid returns. Pure `hit` is intentionally small; `quality_hit` now only checks that first contact has enough outgoing velocity and is not hit downward. Center contact is handled by `hit_centered` plus a multiplicative centering gate on `quality_hit` and `landing_placement`; final placement is handled by `post_hit_landing_prediction` and `landing_placement`.
 
 2026-06-11 retune (fix "hit but never return" / weak-swing / handle-contact). The previous run converged to `hit_rate = 1.0`, `return_rate = 0.0`, `bad_hit_rate = 1.0`: every episode hit the ball but gently (outgoing x speed parked at ~2.1 m/s) and was force-ended as `bad_hit` at the hit-to-return timeout. Three coupled causes were addressed:
 
@@ -270,7 +277,17 @@ The earlier pre-hit `racket_forward_push` term was removed because fixed world-x
 - Return was geometrically unreachable inside the old `0.40 s` hit-to-return timeout (the racket is ~1.5 m from the net; even at the rewarded 2 m/s the ball cannot cross the net before the episode is force-ended). The timeout is now `0.90 s`.
 - Contact location was unrewarded: the racket reference point was the `Link_yb_paddle` body origin (~0.045 m below the blade center) and the `0.25 m` hit gate was larger than the whole paddle, so a handle/edge contact scored the same as a center contact. The reference point is now the blade center (`RACKET_OFFSET_Z = 0.045`, used by the rewards, observations, and the hit/near-miss distance gate alike), `quality_hit` is multiplied by a centeredness factor, and the hit distance gate was tightened to `0.15 m` (still ≥ the blade's ~0.13 m center-to-corner reach, so real contacts are not lost — the contact-force check already requires physical contact).
 
-`racket_face_target` (`0.3`) and `racket_normal_swing` (`0.6`) were re-enabled in the same retune; they had been left at weight `0.0` in the converged run, which removed the only pre-hit incentive to orient and accelerate the paddle face toward the target.
+`racket_face_target` and `racket_normal_swing` were re-enabled in the same retune; they had been left at weight `0.0` in the converged run, which removed the only pre-hit incentive to orient and accelerate the paddle face toward the target.
+
+2026-06-16 retune (center contact, deeper placement, flatter return). The `2026-06-15_17-24-45` run reached a usable valid-return rate but showed three deployment risks: mean hit distance was about `7.9 cm`, landing placement score implied returns still landing roughly half a meter from table center, and hit-time z velocity averaged about `2.6 m/s` with post-hit max height around `1.44 m`. The reward now makes center contact, actual landing placement, and predicted landing placement sharper, while reducing the broad post-hit dense terms that were dominating `reward/total_mean`. It also logs `episode/hit_center_offset_mean`, `episode/landing_x_mean`, and `episode/landing_y_mean` so the next run can be judged without relying only on video.
+
+2026-06-16 follow-up after the 180k→260k resume. The direct `post_hit_lob_penalty` reduced hit-time up speed only modestly (`~2.53 -> ~2.38 m/s`) and post-hit max height only modestly (`~1.43 -> ~1.40 m`), while deterministic eval success dropped versus the previous best (`0.689 -> 0.588`). It was therefore disabled. The flatter-return preference is now expressed by target landing placement and by giving no extra quality-hit bonus to excessive upward speed, not by a dense negative lob penalty. A separate `hit_centered` event term was added because `quality_hit` alone did not improve center contact; the 260k tail still had `hit_center_offset_mean ~= 7.6 cm`.
+
+2026-06-16 reward-boundary cleanup. `quality_hit` was simplified to avoid overlapping with center-contact and landing-placement terms. It no longer multiplies by centeredness and no longer uses a fixed `target_up_speed`; it only ramps outgoing x speed over a viable band and gates out downward hits. `post_hit_outgoing` was disabled because it duplicated the same x-speed semantics after contact; `post_hit_landing_prediction` is now the dense post-hit term responsible for whether the predicted trajectory actually reaches the opponent-side target.
+
+2026-06-16 pre-hit shaping cleanup. The four dense pre-hit shaping terms (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) were set to `0.0` by default. In the 180k→260k resume tail they were strongly negatively correlated with `episode/valid_return_rate` and `episode/hit_rate`, strongly positively correlated with `episode/miss_rate`, and positively correlated with worse `episode/hit_center_offset_mean`. This suggests they had become stale scaffolding after the policy learned contact. They remain in the config only for ablation or early-curriculum experiments.
+
+2026-06-18 center-contact re-gate. Edge/blade contact persisted under the additive-only `hit_centered` term, and the earlier `quality_hit`-only multiplicative gate had already plateaued at `hit_center_offset_mean ≈ 7.6 cm` (see the 2026-06-16 notes). Root cause: the dominant success rewards — `valid_return` (25), `landing_placement` (25), `return_cross_net` (15) — were entirely center-blind, so an edge hit that happened to land in-court collected the same ~65 points as a center hit; gating only `quality_hit` (20) put too little reward mass behind center contact to move the policy. Fix: a shared per-hit centering gate `floor + (1 - floor) * exp(-center_sigma * offset^2)` (`_center_gate_factor` in `rewards.py`, reading the cached `_sac_hit_center_offset`, which persists from the hit step through the `valid_return` step) now multiplies **both** `quality_hit` and `landing_placement` (`center_sigma = 400`, `center_gate_floor = 0.15`). `valid_return` and `return_cross_net` are deliberately left ungated as the unconditional "ball was returned" anchor, so the converged policy cannot forget returning while it learns to center. Sigma is calibrated to the real blade radius (~7.5 cm, 15 cm diameter): `center_sigma = 400` gives a 1/e width of ~5 cm and suppresses a rim hit to factor ~0.24, whereas the inherited `sigma = 220` (1/e width ~6.7 cm, nearly the whole blade) left a rim hit at ~0.43 — nearly flat across the blade, the likely reason both the additive `hit_centered` and the earlier `quality_hit`-only gate failed to pull contact inward. The same `center_sigma = 400` was applied to the additive `hit_centered` term for consistency, and all three terms share `SAC_CENTER_SIGMA` / `SAC_CENTER_GATE_FLOOR` in `env_cfg.py`. Net effect per success: centering from the rim (~7.6 cm) to center raises the gated reward mass (`quality_hit` + `landing_placement`, max 45) from ~11 to ~45, against an ungated return anchor of ~42. The `0.15` floor keeps the gate a gradient rather than a cliff, which the converged-but-oscillating policy is sensitive to (see `docs/sac_catch_oscillation_diagnosis.md`). If `hit_center_offset_mean` still does not fall, the next lever is to extend the gate to `return_cross_net`/`valid_return`, raise `center_sigma` further, or lower the floor; if it falls but `valid_return_rate` drops, raise `center_gate_floor` (or check whether center contact is even kinematically reachable for the fixed serve).
 
 ## 6. Event Logic
 
@@ -296,7 +313,7 @@ Main thresholds:
 Definitions:
 
 - `near_miss`: no hit yet and episode min racket-ball distance <= `0.25`.
-- `hit`: contact sensor force > `0.1` and racket-ball distance < `0.25`; only first hit is tagged.
+- `hit`: contact sensor force > `0.1` and racket-ball distance < `0.15`; only first hit is tagged.
 - `return`: after hit, ball crosses net x toward opponent side with sufficient x velocity and `z > net_z`.
 - `valid_return`: after hit, ball is near table height, over opponent table x range, inside y bounds, and moving down.
 - `bad_hit`: after hit, ball lands on own table, goes out/falls before valid return, or fails to cross the net within `0.90 s` after hit.
@@ -415,7 +432,7 @@ Default hyperparameters:
 | gamma | `0.98` |
 | tau | `0.005` |
 | initial alpha | `0.02` |
-| min alpha | `0.005` |
+| min alpha | `0.02` |
 | target entropy | `-action_dim = -7` |
 
 The `min_alpha` floor was added to avoid entropy collapsing too early while rare events are still sparse.
@@ -439,13 +456,13 @@ Important CLI defaults:
 | Argument | Default |
 | --- | ---: |
 | `--seed` | `1` |
-| `--max_updates` | `10000` |
+| `--max_updates` | `30000` |
 | `--start_steps` | `20000` transitions |
 | `--batch_size` | `4096` |
 | `--replay_size` | `1000000` |
 | `--event_table_size` | `250000` |
 | `--sampler` | `stratified` |
-| `--updates_per_step` | `1` |
+| `--updates_per_step` | `4` |
 | `--log_interval` | `100` |
 | `--checkpoint_interval` | `1000` |
 
@@ -471,6 +488,8 @@ Loss cards:
 
 - `loss/critic_loss`: twin critic Bellman MSE sum.
 - `loss/actor_loss`: entropy-regularized actor objective.
+- `loss/actor_grad_norm`: actor gradient L2 norm measured just before the optimizer step.
+- `loss/critic_grad_norm`: combined twin-critic gradient L2 norm measured just before the optimizer step.
 - `loss/alpha_loss`: temperature tuning loss.
 - `loss/alpha`: current entropy temperature.
 - `loss/q1_mean`, `loss/q2_mean`: average Q values on sampled batch.
@@ -505,6 +524,9 @@ These summarize episodes that ended inside the current logging window. They are 
 - `episode/miss_rate`: fraction of finished episodes with miss.
 - `episode/bad_hit_rate`: fraction of finished episodes with own-table/out/fall after hit.
 - `episode/min_dist_mean`: mean minimum racket-ball distance.
+- `episode/landing_x_mean`: mean final recorded landing x for episodes with a valid/bad landing.
+- `episode/landing_y_mean`: mean final recorded landing y for episodes with a valid/bad landing.
+- `episode/hit_center_offset_mean`: mean in-plane ball offset from the paddle blade center at first hit.
 - `episode/hit_outgoing_speed_mean`: outgoing x speed measured at first hit.
 - `episode/hit_up_speed_mean`: z velocity measured at first hit.
 - `episode/post_hit_max_outgoing_speed_mean`: max outgoing speed after hit before final outcome.
@@ -515,18 +537,23 @@ Reward cards:
 These are weighted reward terms from IsaacLab's `RewardManager`, averaged over environment steps in the current logging window. They are useful for checking whether a shaping term is active and whether a penalty dominates the sparse event rewards.
 
 - `reward/total_mean`: total weighted reward averaged over env steps.
-- `reward_terms/racket_ball_proximity`: dense racket-ball distance shaping.
-- `reward_terms/racket_approach`: positive racket velocity toward the ball.
-- `reward_terms/racket_face_target`: racket normal alignment toward the target landing region.
-- `reward_terms/racket_normal_swing`: racket velocity along the racket normal, gated by face-target alignment.
+- `reward_terms/racket_ball_proximity`: disabled pre-hit distance-shaping ablation hook.
+- `reward_terms/racket_approach`: disabled pre-hit closing-speed ablation hook.
+- `reward_terms/racket_face_target`: disabled pre-hit face-alignment ablation hook.
+- `reward_terms/racket_normal_swing`: disabled pre-hit normal-swing ablation hook.
 - `reward_terms/hit`: sparse contact reward.
-- `reward_terms/quality_hit`: first-contact quality reward from outgoing and upward ball speed.
+- `reward_terms/quality_hit`: first-contact basic outgoing-quality reward from outgoing speed plus a shallow non-downward gate.
+- `reward_terms/hit_centered`: first-contact centeredness reward from cached in-plane ball-to-blade-center offset.
 - `reward_terms/return_cross_net`: sparse crossed-net reward after hit.
 - `reward_terms/valid_return`: sparse valid-return reward.
+- `reward_terms/landing_placement`: valid-return placement score at the actual landing point.
 - `reward_terms/miss`: no-hit miss penalty.
 - `reward_terms/bad_hit`: bad post-hit outcome penalty.
-- `reward_terms/post_hit_outgoing`: post-hit outgoing velocity shaping.
-- `reward_terms/post_hit_lift`: post-hit upward velocity shaping.
+- `reward_terms/post_hit_outgoing`: disabled outgoing-velocity ablation hook.
+- `reward_terms/post_hit_net_progress`: disabled post-hit net-progress hook.
+- `reward_terms/post_hit_net_clearance`: predicted net-clearance shaping.
+- `reward_terms/post_hit_landing_prediction`: predicted opponent-table center placement shaping.
+- `reward_terms/post_hit_lob_penalty`: disabled high-arc penalty ablation hook.
 - `reward_terms/action_rate`: action-change penalty.
 - `reward_terms/joint_acc`: joint-acceleration penalty.
 - `reward_terms/joint_limit`: joint-limit margin barrier penalty.
@@ -538,12 +565,17 @@ Primary cards to watch during reward tuning:
 - `episode/bad_hit_rate`
 - `episode/return_rate`
 - `episode/min_dist_mean`
-- `reward_terms/racket_approach`
-- `reward_terms/racket_face_target`
-- `reward_terms/racket_normal_swing`
+- `episode/hit_center_offset_mean`
+- `episode/landing_x_mean`
+- `episode/hit_up_speed_mean`
+- `episode/post_hit_max_height_mean`
 - `reward_terms/joint_limit`
 - `reward_terms/hit`
 - `reward_terms/quality_hit`
+- `reward_terms/hit_centered`
+- `reward_terms/landing_placement`
+- `reward_terms/post_hit_landing_prediction`
+- `reward_terms/post_hit_lob_penalty`
 - `reward_terms/miss`
 
 ## 11. Latency Model
@@ -588,12 +620,27 @@ For GUI inspection, omit `--headless` and add `--real_time` or `--sleep_per_step
 
 For reset-pose and ball-trajectory inspection without a learned policy, use `--zero_action`; in that mode `--checkpoint` is not required and the script sends all-zero normalized actions.
 
+Playback writes a per-step simulated joint CSV by default under:
+
+```text
+logs/sac_table_tennis/sim_logs/
+```
+
+The file stem is derived from the task id, checkpoint run folder, and checkpoint name, for example `A1-TableTennis-SAC-Catch__2026-06-10_17-13-09__agent_0010000.csv`. Use `--sim_log_dir <dir>` to redirect it or `--no_sim_log` to disable it. The CSV contains one row per env per play step with `global_step`, `time_s`, `env_id`, `episode`, `episode_step`, done flags, normalized `action_*`, processed `q_target_*`, simulated `q_sim_*`, `qd_sim_*`, and `tau_sim_*` for `joint_yb_1..7`. `q_target_*` is the `JointDeltaTargetAction` position target after scaling, smoothing, rate limiting, and clamping; `tau_sim_*` is read from IsaacLab `robot.data.applied_torque`.
+
+Visualize a recorded joint CSV with `python scripts/sac_table_tennis/plot_sim_joint_log.py <csv> --env_id 0 --episode 1`. If no CSV path is provided, the script uses the newest file in `logs/sac_table_tennis/sim_logs/`. The plot layout is one row per joint and three columns: target-vs-sim joint position, simulated joint velocity, and simulated torque.
+
 Printed evaluation output includes:
 
 - episode index
 - decoded event list
-- landing y
+- landing x/y
+- min racket-ball distance
+- hit-center offset
+- hit-time outgoing and upward speed
+- post-hit max height
 - final event counts
+- metric means
 
 ## 13. Current Test Coverage
 

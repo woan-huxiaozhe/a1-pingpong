@@ -47,6 +47,18 @@ def mlp(input_dim: int, hidden_dims: Iterable[int], output_dim: int, activation:
     return nn.Sequential(*layers)
 
 
+def _grad_l2_norm(parameters: Iterable[torch.nn.Parameter]) -> torch.Tensor:
+    total = None
+    for param in parameters:
+        if param.grad is None:
+            continue
+        value = param.grad.detach().pow(2).sum()
+        total = value if total is None else total + value
+    if total is None:
+        return torch.tensor(0.0)
+    return total.sqrt()
+
+
 class TanhGaussianActor(nn.Module):
     def __init__(self, obs_dim: int, action_dim: int, hidden_dims: tuple[int, ...], activation: str):
         super().__init__()
@@ -159,8 +171,10 @@ class SACAgent:
         q2 = self.critic2(obs_critic, action)
         critic_loss = F.mse_loss(q1, backup) + F.mse_loss(q2, backup)
 
+        critic_params = list(self.critic1.parameters()) + list(self.critic2.parameters())
         self.critic_opt.zero_grad(set_to_none=True)
         critic_loss.backward()
+        critic_grad_norm = _grad_l2_norm(critic_params)
         self.critic_opt.step()
 
         new_action, log_prob = self.actor.sample(obs_actor)
@@ -169,8 +183,10 @@ class SACAgent:
         q_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha.detach() * log_prob - q_pi).mean()
 
+        actor_params = list(self.actor.parameters())
         self.actor_opt.zero_grad(set_to_none=True)
         actor_loss.backward()
+        actor_grad_norm = _grad_l2_norm(actor_params)
         self.actor_opt.step()
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
@@ -185,6 +201,8 @@ class SACAgent:
         return {
             "critic_loss": float(critic_loss.detach().cpu()),
             "actor_loss": float(actor_loss.detach().cpu()),
+            "actor_grad_norm": float(actor_grad_norm.detach().cpu()),
+            "critic_grad_norm": float(critic_grad_norm.detach().cpu()),
             "alpha_loss": float(alpha_loss.detach().cpu()),
             "alpha": float(self.alpha.detach().cpu()),
             "q1_mean": float(q1.detach().mean().cpu()),

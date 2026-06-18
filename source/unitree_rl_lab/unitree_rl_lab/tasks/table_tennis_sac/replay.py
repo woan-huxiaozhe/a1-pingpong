@@ -257,7 +257,9 @@ class EpisodeInfo:
     valid_return_step: int = -1
     bad_hit_step: int = -1
     miss_step: int = -1
+    landing_x: float = float("nan")
     landing_y: float = float("nan")
+    hit_center_offset: float = float("nan")
     hit_outgoing_speed: float = float("nan")
     hit_up_speed: float = float("nan")
     post_hit_max_outgoing_speed: float = float("nan")

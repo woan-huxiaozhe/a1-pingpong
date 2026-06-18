@@ -32,6 +32,8 @@ def _ensure_tracker(env: ManagerBasedEnv):
         "_sac_final_landing_y": (torch.float32, float("nan")),
         "_sac_landing_x": (torch.float32, float("nan")),
         "_sac_final_landing_x": (torch.float32, float("nan")),
+        "_sac_hit_center_offset": (torch.float32, float("nan")),
+        "_sac_final_hit_center_offset": (torch.float32, float("nan")),
         "_sac_hit_outgoing_speed": (torch.float32, float("nan")),
         "_sac_hit_up_speed": (torch.float32, float("nan")),
         "_sac_post_hit_max_outgoing_speed": (torch.float32, float("-inf")),
@@ -78,6 +80,7 @@ def reset_sac_episode_state(env: ManagerBasedEnv, env_ids: torch.Tensor | None =
     env._sac_min_dist[ids] = float("inf")
     env._sac_landing_y[ids] = float("nan")
     env._sac_landing_x[ids] = float("nan")
+    env._sac_hit_center_offset[ids] = float("nan")
     env._sac_hit_outgoing_speed[ids] = float("nan")
     env._sac_hit_up_speed[ids] = float("nan")
     env._sac_post_hit_max_outgoing_speed[ids] = float("-inf")
@@ -139,7 +142,7 @@ def reset_robot_to_ready_pose(
         action._limit_violation[ids] = False
 
 
-def _racket_pos_from_sensor(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+def _racket_pose_from_sensor(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> tuple[torch.Tensor, torch.Tensor]:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     racket_body_name = getattr(sensor_cfg, "_cached_racket_body_name", None)
     if racket_body_name is None:
@@ -153,7 +156,11 @@ def _racket_pos_from_sensor(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) ->
     quat = robot.data.body_quat_w[:, body_idx]
     offset_l = torch.zeros_like(pos)
     offset_l[:, 2] = RACKET_OFFSET_Z
-    return pos + quat_rotate(quat, offset_l)
+    return pos + quat_rotate(quat, offset_l), quat
+
+
+def _racket_pos_from_sensor(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    return _racket_pose_from_sensor(env, sensor_cfg)[0]
 
 
 def update_sac_episode_state(
@@ -187,8 +194,19 @@ def update_sac_episode_state(
     ball_pos = ball.data.root_pos_w[:, :3] - env.scene.env_origins
     ball_vel = ball.data.root_lin_vel_w
     outgoing_speed = -float(robot_side) * ball_vel[:, 0]
-    racket_pos = _racket_pos_from_sensor(env, sensor_cfg) - env.scene.env_origins
+    racket_pos_w, racket_quat = _racket_pose_from_sensor(env, sensor_cfg)
+    racket_pos = racket_pos_w - env.scene.env_origins
     dist = torch.norm(racket_pos - ball_pos, dim=-1)
+    rel_w = ball.data.root_pos_w[:, :3] - racket_pos_w
+    local_x = torch.zeros_like(rel_w)
+    local_z = torch.zeros_like(rel_w)
+    local_x[:, 0] = 1.0
+    local_z[:, 2] = 1.0
+    axis_x = quat_rotate(racket_quat, local_x)
+    axis_z = quat_rotate(racket_quat, local_z)
+    hit_center_offset = torch.sqrt(
+        torch.sum(rel_w * axis_x, dim=-1).square() + torch.sum(rel_w * axis_z, dim=-1).square()
+    )
     step = env.episode_length_buf.to(torch.long)
 
     closer = dist < env._sac_min_dist
@@ -202,6 +220,7 @@ def update_sac_episode_state(
     new_hit = hit_now & ~env._sac_hit
     env._sac_hit[new_hit] = True
     env._sac_hit_step[new_hit] = step[new_hit]
+    env._sac_hit_center_offset[new_hit] = hit_center_offset[new_hit]
     env._sac_hit_outgoing_speed[new_hit] = outgoing_speed[new_hit]
     env._sac_hit_up_speed[new_hit] = ball_vel[new_hit, 2]
     env._sac_step_event_mask[new_hit] |= EVENT_TO_BIT["hit"]
@@ -297,6 +316,7 @@ def capture_sac_final_info(env: ManagerBasedEnv, done: torch.Tensor):
     env._sac_final_min_dist[done] = env._sac_min_dist[done]
     env._sac_final_landing_y[done] = env._sac_landing_y[done]
     env._sac_final_landing_x[done] = env._sac_landing_x[done]
+    env._sac_final_hit_center_offset[done] = env._sac_hit_center_offset[done]
     env._sac_final_hit_outgoing_speed[done] = env._sac_hit_outgoing_speed[done]
     env._sac_final_hit_up_speed[done] = env._sac_hit_up_speed[done]
     env._sac_final_post_hit_max_outgoing_speed[done] = env._sac_post_hit_max_outgoing_speed[done]
