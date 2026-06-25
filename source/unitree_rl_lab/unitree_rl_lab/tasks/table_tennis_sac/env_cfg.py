@@ -27,7 +27,9 @@ from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
 BALL_HISTORY_LENGTH = 4
 JOINT_POS_DELTA_HISTORY_LENGTH = 3
 SAC_ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE
-SAC_ROBOT_X = -1.47
+SAC_ROBOT_X = -1.37
+# For ROBOT_SIDE=-1, an unhit ball is missed once it passes SAC_ROBOT_X - margin.
+SAC_MISS_MARGIN = 0.10
 
 SAC_READY_LIFT_POS = -0.22
 # SAC_READY_JOINT_POS = [1.13, -0.39, 2.00, -1.32, 0.0, 1.0, -1.845288]
@@ -59,7 +61,7 @@ SAC_CENTER_GATE_FLOOR = 0.15
 SAC_FIXED_MIDDLE_BALL = {
     "x_range": (-1.0 * ROBOT_SIDE, -1.0 * ROBOT_SIDE),
     "y_range": (0.0, 0.20),
-    "z_range": (1.05, 1.25),
+    "z_range": (1.15, 1.25),
     "vx_range": (3.8 * ROBOT_SIDE, 4.3 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
     "vz_range": (1.05, 1.35),
@@ -284,11 +286,15 @@ class RewardsCfg:
     # )
     # miss = RewTerm(func=mdp.sac_miss_penalty, weight=-5.0)
     # bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-3.0)
-    # post_hit_outgoing = RewTerm(
-    #     func=mdp.post_hit_outgoing_velocity,
-    #     weight=0.0,
-    #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_speed": 3.5},
-    # )
+    # Dense bridge hit->return (re-enabled): rewards outgoing x-speed toward the opponent on
+    # hit & ~valid_return & ~bad_hit, [0,1] scaled by target_speed. Height-blind (x only), so it
+    # must be paired with a height/flatness term to avoid farming lobs. Starting weight 1.0 --
+    # this is the main knob: raise it if returns still fail to emerge against joint_limit.
+    post_hit_outgoing = RewTerm(
+        func=mdp.post_hit_outgoing_velocity,
+        weight=1.0,
+        params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_speed": 3.5},
+    )
     # post_hit_net_progress = RewTerm(
     #     func=mdp.post_hit_net_progress,
     #     weight=0.0,
@@ -300,10 +306,16 @@ class RewardsCfg:
     # systematically optimistic -- they paid partial credit to a high lob that never reaches
     # the opponent table, cementing the touch-lob local optimum. The active sparse/event run
     # relies on return_cross_net, valid_return, landing_placement, and flat_return instead.
-    # post_hit_net_clearance = RewTerm(
-    #     func=mdp.post_hit_net_clearance, weight=1.0,
-    #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE},
-    # )
+    # Height-aware partner to post_hit_outgoing (re-enabled with a drag-correct predictor):
+    # rewards the predicted ball height at the net plane via mdp.predict_z_at_x, which mirrors
+    # the sim's quadratic-drag (k=0.08) + linear-damping (0.05) dynamics -- so it no longer
+    # over-credits high lobs the way the old gravity-only solve did. This is the term that gives
+    # the policy a "flatter/faster = better" gradient and discourages the touch-lob optimum.
+    post_hit_net_clearance = RewTerm(
+        func=mdp.post_hit_net_clearance,
+        weight=1.0,
+        params={"ball_name": "ball", "robot_side": ROBOT_SIDE},
+    )
     # post_hit_landing_prediction = RewTerm(
     #     func=mdp.post_hit_landing_prediction, weight=5.0,
     #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_x": OPP_TABLE_CENTER_X,
@@ -327,7 +339,7 @@ class RewardsCfg:
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
     joint_acc = RewTerm(
         func=mdp.joint_acc_l2,
-        weight=-1.0e-6,
+        weight=-5.0e-7,  # halved (-1.0e-6->-5.0e-7) to let the swing accelerate while learning the motion
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
     )
     joint_jerk = RewTerm(
@@ -335,14 +347,19 @@ class RewardsCfg:
         weight=-2.0e-10,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
     )
+    # margin 0.20->0.05 (rad) + weight -3.0->-1.0: the 0.20 rad (~11.5 deg) band over all 7
+    # arm joints fired a dense per-step penalty across the entire return swing, so producing a
+    # return cratered total reward (joint_limit hit -0.46 the moment returns appeared) while the
+    # sparse return payoff was discounted away -- returns were net-negative and got suppressed.
+    # The narrowed band only bites within ~2.9 deg of a hard limit; revisit/anneal up later.
     joint_limit = RewTerm(
         func=mdp.joint_limit_margin_penalty,
-        weight=-3.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin": 0.20},
+        weight=-1.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin": 0.05},
     )
     joint_effort_margin = RewTerm(
         func=mdp.joint_effort_margin_penalty,
-        weight=-0.5,
+        weight=-0.25,  # halved (-0.5->-0.25) to unblock the swing while learning the motion
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin_frac": 0.85},
     )
 
@@ -383,6 +400,7 @@ class EventCfg:
             "own_table_x_max": OWN_TABLE_X[1],
             "opponent_table_x_min": OPP_TABLE_X[0],
             "opponent_table_x_max": OPP_TABLE_X[1],
+            "miss_margin": SAC_MISS_MARGIN,
             "hit_return_timeout_s": 0.90,
         },
     )

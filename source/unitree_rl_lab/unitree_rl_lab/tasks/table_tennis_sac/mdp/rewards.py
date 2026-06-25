@@ -17,6 +17,7 @@ from unitree_rl_lab.tasks.table_tennis_sac.mdp.hitting import (
     PADDLE_RESTITUTION,
     ideal_racket_velocity,
     predict_landing_xy,
+    predict_z_at_x,
 )
 from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_lin_vel, _racket_body_state
 
@@ -686,38 +687,47 @@ def post_hit_net_clearance(
     net_z: float = 0.9125,
     ramp_low: float = -0.6,
     ramp_high: float = 0.1,
-    gravity: float = 9.81,
+    drag_k: float = 0.08,
+    lin_damp: float = 0.05,
 ) -> torch.Tensor:
-    """Dense bridge toward an actual return: reward the *predicted* ball height at the net.
+    """Dense bridge toward an actual return: reward the *drag-correct* predicted ball height
+    at the net plane.
 
-    The sparse return/valid_return events only fire once the ball is already above the net
-    at ``x = net_x``; before the policy can ever produce such a hit they give zero gradient,
-    so training settles into a steep lob that farms ``post_hit_outgoing`` /
-    ``post_hit_net_progress`` (both height-blind) and then times out as a bad hit. This term
-    closes that gap. The scene has no air drag, so a gravity-only projectile solve predicts
-    the ball's height when it reaches the net plane *exactly*; rewarding that predicted
-    clearance gives a smooth, every-step gradient that rises as the hit gets flatter /
-    faster / struck from a higher contact point -- i.e. toward a real return.
+    The sparse return/valid_return events only fire once the ball is already above the net at
+    ``x = net_x``; before the policy can produce such a hit they give zero gradient, so training
+    settles into a steep lob that farms the height-blind ``post_hit_outgoing`` /
+    ``post_hit_net_progress`` terms and then times out as a bad hit. This term closes that gap by
+    rewarding the predicted net-crossing height -- higher as the hit gets flatter / faster /
+    struck from a higher contact point, i.e. toward a real return.
 
-    ``ramp_low`` starts the slope *below* the current lob's clearance so there is a non-zero
-    gradient at the policy's operating point; the score saturates at ``ramp_high`` (ball
-    passing ~10 cm above the net). Over-lofting can be handled by the hit-time quality term
-    or the optional ``post_hit_lob_penalty`` ablation. Active only while the ball is still on
-    the robot's side and travelling toward the net, so it shapes the approach to the net
-    rather than re-scoring a ball that has already crossed.
-    """
+    The prediction uses ``hitting.predict_z_at_x``, which integrates the SAME discrete dynamics
+    the sim applies (per-substep gravity + linear damping + one quadratic air-drag patch per
+    control step). The earlier gravity-only solve assumed a drag-free scene; with the scene's
+    quadratic drag (k=0.08) + linear damping (0.05) it systematically OVER-predicted the net
+    height and paid partial credit to high lobs, cementing the touch-lob local optimum -- the
+    drag-aware solve is the fix. ``ramp_low`` starts the slope below the lob's clearance so there
+    is gradient at the operating point; the score saturates at ``ramp_high`` (~10 cm above net).
+    Active only while the ball is still on the robot's side and travelling toward the net."""
     _ensure_tracker(env)
     ball: RigidObject = env.scene[ball_name]
-    ball_x = ball.data.root_pos_w[:, 0] - env.scene.env_origins[:, 0]
-    ball_z = ball.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2]
-    outgoing_speed = -float(robot_side) * ball.data.root_lin_vel_w[:, 0]
-    vz = ball.data.root_lin_vel_w[:, 2]
-    time_to_net = (net_x - ball_x).abs() / outgoing_speed.clamp(min=0.2)
-    z_at_net = ball_z + vz * time_to_net - 0.5 * gravity * time_to_net * time_to_net
+    pos = ball.data.root_pos_w[:, :3] - env.scene.env_origins[:, :3]
+    vel = ball.data.root_lin_vel_w[:, :3]
+    z_at_net, predicted = predict_z_at_x(
+        pos, vel, net_x=net_x, drag_k=drag_k, lin_damp=lin_damp, control_dt=env.step_dt,
+    )
     clearance = z_at_net - net_z
     score = ((clearance - ramp_low) / max(ramp_high - ramp_low, 1.0e-6)).clamp(min=0.0, max=1.0)
+    ball_x = pos[:, 0]
+    outgoing_speed = -float(robot_side) * vel[:, 0]
     before_net = (ball_x - net_x) * float(robot_side) > 0.0
-    active = env._sac_hit & ~env._sac_valid_return & ~env._sac_bad_hit & (outgoing_speed > 0.2) & before_net
+    active = (
+        env._sac_hit
+        & ~env._sac_valid_return
+        & ~env._sac_bad_hit
+        & (outgoing_speed > 0.2)
+        & before_net
+        & predicted
+    )
     return torch.where(active, score, torch.zeros_like(score))
 
 

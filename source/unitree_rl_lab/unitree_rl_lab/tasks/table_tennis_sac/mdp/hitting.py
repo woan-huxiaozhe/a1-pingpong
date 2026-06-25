@@ -283,3 +283,69 @@ def predict_landing_xy(
         if bool(valid.all()):
             break
     return land_x, land_y, valid
+
+
+def predict_z_at_x(
+    origin: torch.Tensor,
+    vel: torch.Tensor,
+    *,
+    net_x: float = 0.0,
+    drag_k: float = 0.08,
+    lin_damp: float = 0.05,
+    control_dt: float = 0.02,
+    substeps: int = 4,
+    gravity: float = 9.81,
+    max_flight_s: float = 1.2,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Forward-integrate a ball ``[N,3]`` and return its height ``z`` when it first crosses
+    the vertical plane ``x = net_x``, plus a boolean ``valid`` mask.
+
+    Uses the SAME discrete dynamics as :func:`predict_landing_xy` -- per-substep gravity +
+    linear damping, then ONE quadratic air-drag patch per control step (mirroring
+    ``events.apply_air_drag`` / ``_step_dynamics``) -- so the predicted net-crossing height
+    matches the simulator's draggy flight rather than an optimistic gravity-only solve. Drag
+    bleeds forward speed, so the ball takes longer to reach the net and falls further: the
+    drag-correct height is *lower* than a gravity-only solve, which is exactly why the latter
+    over-credited high lobs. ``valid`` is False where the ball never reaches the net plane
+    within ``max_flight_s`` (e.g. struck away from the net or stalls short)."""
+    n = origin.shape[0]
+    device = origin.device
+    dtype = origin.dtype
+    pos = origin.clone()
+    vx = vel[:, 0].clone()
+    vy = vel[:, 1].clone()
+    vz = vel[:, 2].clone()
+    z_at_net = torch.zeros(n, device=device, dtype=dtype)
+    valid = torch.zeros(n, dtype=torch.bool, device=device)
+
+    n_steps = int(round(max_flight_s / control_dt))
+    sub_dt = control_dt / substeps
+    damp_total = (1.0 / (1.0 + lin_damp * sub_dt)) ** substeps
+    for _ in range(n_steps):
+        x = pos[:, 0]
+        z = pos[:, 2]
+        x_next = x + vx * control_dt
+        y_next = pos[:, 1] + vy * control_dt
+        z_next = z + vz * control_dt
+        # plane crossing: (x - net_x) and (x_next - net_x) straddle zero (direction-agnostic)
+        moving = (x_next - x).abs() > 1.0e-9
+        crossing = (~valid) & (((x - net_x) * (x_next - net_x)) <= 0.0) & moving
+        if torch.any(crossing):
+            denom = torch.where((x_next - x).abs() < 1.0e-9, torch.full_like(x, 1.0e-9), x_next - x)
+            frac = ((net_x - x) / denom).clamp(0.0, 1.0)
+            z_at_net = torch.where(crossing, z + frac * (z_next - z), z_at_net)
+            valid = valid | crossing
+        pos = torch.stack([x_next, y_next, z_next], dim=-1)
+        # advance velocity: gravity + linear damping (analytic over substeps) + one quad drag patch
+        vz = vz - gravity * control_dt
+        vx = vx * damp_total
+        vy = vy * damp_total
+        vz = vz * damp_total
+        speed = torch.sqrt(vx * vx + vy * vy + vz * vz).clamp(min=1.0e-9)
+        factor = (1.0 - drag_k * speed * control_dt).clamp(min=0.0)
+        vx = vx * factor
+        vy = vy * factor
+        vz = vz * factor
+        if bool(valid.all()):
+            break
+    return z_at_net, valid

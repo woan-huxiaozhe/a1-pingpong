@@ -55,7 +55,9 @@ Robot and scene:
 - Racket body: `Link_yb_paddle`.
 - Robot side: `ROBOT_SIDE = -1`.
 - Robot base x: `SAC_ROBOT_BASE_X = -(1.37 + 0.45) = -1.82`.
-- Robot contact/evaluation x: `SAC_ROBOT_X = -1.47`.
+- Robot contact/evaluation x: `SAC_ROBOT_X = -1.37`.
+- Unhit-ball miss margin: `SAC_MISS_MARGIN = 0.10`, so with `ROBOT_SIDE = -1`
+  an unhit ball is declared missed after it passes `x = -1.47`.
 - Own table x range: `[-1.37, 0.0]`.
 - Opponent table x range: `[0.0, 1.37]`.
 - Net x: `0.0`.
@@ -90,12 +92,13 @@ table restitution was raised to `0.95`.
 extracts the measured state at `x=1.0`, samples with an empirical bootstrap,
 KDE, or multivariate Gaussian model, and rejects candidates that do not clear
 the net, do not produce the configured number of table bounces, or arrive
-outside the reachable `SAC_ROBOT_X = -1.47` hit window. The default generator
-keeps both the full-serve pre-bounce branch and the post-bounce incoming branch;
-use `--post-bounce-only` only for a conservative one-bounce curriculum that
-starts after the opponent-side table bounce. The real-trajectory filtering,
-IsaacSim validation, damping/drag scans, and measured error tables are recorded
-in `docs/sac_real_serve_state_pipeline.md`.
+outside the configured hit window. When regenerating a real-serve table for the
+current contact plane, pass `--robot-x -1.37 --source-filter-robot-x -1.37`.
+The default generator keeps both the full-serve pre-bounce branch and the
+post-bounce incoming branch; use `--post-bounce-only` only for a conservative
+one-bounce curriculum that starts after the opponent-side table bounce. The
+historical real-trajectory filtering, IsaacSim validation, damping/drag scans,
+and measured error tables are recorded in `docs/sac_real_serve_state_pipeline.md`.
 
 Default full-serve generation command:
 
@@ -114,7 +117,7 @@ Robot reset:
 - Every episode reset now writes the fixed-base robot root back to its default root state.
 - The locked lift joint is initialized through `SAC_READY_LIFT_POS = -0.22`.
 - Isaac reports the lift joint's legal range as `[-0.800, -0.050]`. This value sits between the original SAC/A1 default lift `-0.28` and the higher tested lift `-0.06`.
-- A static USD joint-anchor FK check estimates the current ready-pose paddle-center height at about `1.016 m`; the fixed ball above is tuned to cross `x = -1.47` slightly above that height.
+- The contact/evaluation plane is intentionally ahead of the ready-pose paddle x location to leave approach space before contact. The miss boundary remains 10 cm behind that plane.
 - The controlled right arm is reset to `SAC_READY_JOINT_POS`.
 - Current ready pose:
   - `[1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]`
