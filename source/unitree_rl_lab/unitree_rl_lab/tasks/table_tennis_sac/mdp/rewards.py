@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,12 @@ from isaaclab.utils.math import quat_rotate
 
 from unitree_rl_lab.tasks.table_tennis_sac.event_tags import EVENT_TO_BIT
 from unitree_rl_lab.tasks.table_tennis_sac.mdp.events import _ensure_tracker
+from unitree_rl_lab.tasks.table_tennis_sac.mdp.hitting import (
+    NEUTRAL_THETA,
+    PADDLE_RESTITUTION,
+    ideal_racket_velocity,
+    predict_landing_xy,
+)
 from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_lin_vel, _racket_body_state
 
 if TYPE_CHECKING:
@@ -182,6 +189,222 @@ def racket_forward_push_velocity(
     return torch.where(active, scaled, torch.zeros_like(scaled))
 
 
+def racket_ideal_velocity_match(
+    env: ManagerBasedRLEnv,
+    ball_name: str,
+    racket_body_name: str,
+    robot_side: int,
+    target_x: float,
+    target_y: float = 0.0,
+    target_z: float = 0.76,
+    theta: float = NEUTRAL_THETA,
+    restitution: float = PADDLE_RESTITUTION,
+    drag_k: float = 0.08,
+    lin_damp: float = 0.05,
+    proximity_gate: float = 0.45,
+    max_target_speed: float = 6.0,
+) -> torch.Tensor:
+    """Pre-contact swing driver: reward the paddle for building the *analytic* racket-tip
+    velocity that returns the current incoming ball to the opponent table center.
+
+    Unlike the disabled ``racket_normal_swing_velocity`` (hand-fixed ``launch_speed=4.5``,
+    direction only), the target here is the full velocity vector from
+    ``hitting.ideal_racket_velocity``: a drag-aware launch solve (neutral arc ``theta``,
+    integrated with the sim's quadratic air drag + linear damping) plus a closed-form
+    rigid-contact inversion (restitution ``e``). A faster incoming ball needs *less* paddle
+    speed, a slow ball needs a real forward-up swing -- the swing requirement is emergent
+    from physics, not a constant. Computed from the CLEAN ball (privileged; this reward is
+    never deployed -- the deployable command mirror is added to the actor obs separately).
+
+    ``reward = clamp(1 - |v_racket_body_origin - v_target| / |v_target|, 0, 1)`` where
+    ``v_target`` is ``v_paddle_ideal`` with magnitude capped at ``max_target_speed``. This is a
+    FULL-VECTOR match: unlike a direction-only projection it penalizes BOTH a too-steep swing
+    (orthogonal residual) and a too-slow one (magnitude residual), so the only way to score is
+    to drive the paddle along the physically-correct flatter+faster ideal velocity. A stationary
+    paddle scores exactly 0 (residual == |v_target|); a perfect match scores 1; the falloff is
+    linear so the gradient never vanishes inside the band. (The earlier projection form
+    ``clamp(<v_act, dir(ideal)>/|ideal|, 0, 1)`` left the orthogonal component free and saturated
+    once aligned, which parked the policy at a ~48 deg / ~3 m/s lob that landed ~0.3 m short.)
+    Gated to the approach window (near ball, ball incoming, not yet hit/missed). The body-origin
+    paddle velocity (not blade-center) is used so a wrist flick through the 0.045 m offset cannot
+    farm it; the small ``omega x r`` gap vs the blade-center target is left to the terminal
+    reward to resolve. Velocity only -- no orientation term yet.
+    """
+    _ensure_tracker(env)
+    ball: RigidObject = env.scene[ball_name]
+    racket_center, _, _ = _racket_body_state(env, racket_body_name)
+    racket_lin_vel = _racket_body_lin_vel(env, racket_body_name)
+
+    origin = ball.data.root_pos_w[:, :3]
+    v_in = ball.data.root_lin_vel_w[:, :3]
+    target = torch.zeros_like(origin)
+    target[:, 0] = env.scene.env_origins[:, 0] + target_x
+    target[:, 1] = env.scene.env_origins[:, 1] + target_y
+    target[:, 2] = env.scene.env_origins[:, 2] + target_z
+
+    v_paddle_ideal, _, _ = ideal_racket_velocity(
+        origin,
+        v_in,
+        target,
+        theta=theta,
+        restitution=restitution,
+        drag_k=drag_k,
+        lin_damp=lin_damp,
+        control_dt=env.step_dt,
+    )
+    ideal_norm = torch.norm(v_paddle_ideal, dim=-1, keepdim=True).clamp(min=1.0e-6)
+    # Cap the target magnitude: a very slow incoming ball demands an unreachably fast swing;
+    # clamping keeps v_target physically achievable and the residual well-scaled.
+    target_speed = ideal_norm.clamp(max=max_target_speed)  # [N,1]
+    v_target = v_paddle_ideal / ideal_norm * target_speed  # ideal direction, capped magnitude
+    # Full-vector residual: penalizes both wrong direction (too steep) and wrong magnitude
+    # (too slow). Linear falloff normalized by the target speed -> 0 at a stationary paddle,
+    # 1 at a perfect match, constant gradient inside the band.
+    err = torch.norm(racket_lin_vel - v_target, dim=-1)
+    score = (1.0 - err / target_speed.squeeze(-1)).clamp(min=0.0, max=1.0)
+
+    dist = torch.norm(racket_center - origin, dim=-1)
+    incoming = ball.data.root_lin_vel_w[:, 0] * float(robot_side) > 0.0
+    active = (dist < proximity_gate) & incoming & ~env._sac_hit & ~env._sac_miss
+    return torch.where(active, score, torch.zeros_like(score))
+
+
+def racket_ideal_normal_match(
+    env: ManagerBasedRLEnv,
+    ball_name: str,
+    racket_body_name: str,
+    robot_side: int,
+    target_x: float,
+    target_y: float = 0.0,
+    target_z: float = 0.76,
+    theta: float = NEUTRAL_THETA,
+    restitution: float = PADDLE_RESTITUTION,
+    drag_k: float = 0.08,
+    lin_damp: float = 0.05,
+    proximity_gate: float = 0.45,
+    angle_tol_deg: float = 45.0,
+) -> torch.Tensor:
+    """Pre-contact ORIENTATION driver: align the blade face normal with the analytic
+    ``n_ideal`` that returns the current incoming ball to the opponent table center.
+
+    This is the term that was missing while ``racket_ideal_velocity_match`` shaped only the
+    paddle *translational velocity* ("Velocity only -- no orientation term yet"). The 0624
+    contact-state rollout showed the converged policy's face normal sits only ~11 deg off
+    ``n_ideal`` but is *systematically ~10 deg too steep* (face elevation ~32 deg vs the
+    ideal ~21 deg); because the ball launch angle is roughly twice the face elevation, that
+    bias is amplified into a ~49 deg lob (vs the 28 deg drive) that lands short. The normal
+    is otherwise unrewarded, so nothing corrects the bias.
+
+    ``n_ideal`` is the face normal returned (and previously discarded) by
+    ``hitting.ideal_racket_velocity`` -- ``normalize(v_out - v_in)`` for the drag-aware
+    neutral-arc launch + closed-form rigid contact inversion. The score is LINEAR IN ANGLE,
+    ``clamp(1 - angle(n_actual, n_ideal) / angle_tol, 0, 1)``, NOT a raw dot product: near
+    alignment a dot is flat (cos 11 deg = 0.98 ~ cos 5 deg = 0.996, no gradient), whereas the
+    angular form keeps a constant gradient that can actually drive the ~10 deg bias out.
+    Gated to the same approach window as the velocity match (near ball, ball incoming, not
+    yet hit/missed). Clean privileged ball (never deployed). Orientation only -- pairs with
+    ``racket_ideal_velocity_match`` (speed) and ``racket_predicted_landing`` (the joint
+    outcome)."""
+    _ensure_tracker(env)
+    ball: RigidObject = env.scene[ball_name]
+    racket_center, _, racket_quat = _racket_body_state(env, racket_body_name)
+
+    origin = ball.data.root_pos_w[:, :3]
+    v_in = ball.data.root_lin_vel_w[:, :3]
+    target = torch.zeros_like(origin)
+    target[:, 0] = env.scene.env_origins[:, 0] + target_x
+    target[:, 1] = env.scene.env_origins[:, 1] + target_y
+    target[:, 2] = env.scene.env_origins[:, 2] + target_z
+
+    _, _, n_ideal = ideal_racket_velocity(
+        origin, v_in, target, theta=theta, restitution=restitution,
+        drag_k=drag_k, lin_damp=lin_damp, control_dt=env.step_dt,
+    )
+    local_normal = torch.zeros_like(origin)
+    local_normal[:, 1] = 1.0
+    racket_normal = quat_rotate(racket_quat, local_normal)
+
+    cos_angle = torch.sum(racket_normal * n_ideal, dim=-1).clamp(-1.0, 1.0)
+    angle = torch.acos(cos_angle)
+    tol = max(math.radians(angle_tol_deg), 1.0e-6)
+    score = (1.0 - angle / tol).clamp(min=0.0, max=1.0)
+
+    dist = torch.norm(racket_center - origin, dim=-1)
+    incoming = ball.data.root_lin_vel_w[:, 0] * float(robot_side) > 0.0
+    active = (dist < proximity_gate) & incoming & ~env._sac_hit & ~env._sac_miss
+    return torch.where(active, score, torch.zeros_like(score))
+
+
+def racket_predicted_landing(
+    env: ManagerBasedRLEnv,
+    ball_name: str,
+    racket_body_name: str,
+    robot_side: int,
+    target_x: float,
+    target_y: float = 0.0,
+    target_z: float = 0.76,
+    restitution: float = PADDLE_RESTITUTION,
+    drag_k: float = 0.08,
+    lin_damp: float = 0.05,
+    sigma_x: float = 0.35,
+    sigma_y: float = 0.3,
+    proximity_gate: float = 0.45,
+) -> torch.Tensor:
+    """Pre-contact OUTCOME driver: "if you struck the ball right now with your current blade
+    pose and velocity, where would it land?" -- reward an in-court predicted landing near
+    the opponent-table center.
+
+    This is the holistic companion to the separate normal (orientation) and velocity (speed)
+    shaping: it couples the actual face normal, the actual blade-center velocity, and the
+    incoming ball into ONE signal, so the only way to score is the combination that genuinely
+    returns the ball. The 0624 counterfactual showed that from the deep interception plane
+    (contact ~2.1 m from target) neither flattening alone nor a faster swing alone suffices --
+    only the joint flat+fast drive lands in court -- so an outcome reward that scores the
+    *combination* is what the separable terms cannot provide on their own.
+
+    Forward model: a rigid frictionless bounce of the incoming ball off the current blade,
+    ``v_out_pred = v_in - (1 + e) * ((v_in - v_p) . n) * n`` with ``v_p`` the blade-center
+    (contact-point) velocity and ``n`` the face normal, then the drag-aware
+    ``hitting.predict_landing_xy`` (the SAME discrete dynamics the sim integrates, NOT a
+    gravity-only solve -- the gravity-only predictors were disabled precisely because they
+    over-credited a lob that never reaches the table). The reward is a Gaussian on the
+    predicted landing vs ``(target_x, target_y)``; an undershoot still earns a small,
+    monotonically rising score as the predicted landing creeps toward the net, giving the
+    non-vanishing gradient the sparse terminal ``valid_return`` cannot. Gated to the approach
+    window, to a forward (toward-opponent) predicted launch, and to a valid descending
+    landing (else 0). Clean privileged ball."""
+    _ensure_tracker(env)
+    ball: RigidObject = env.scene[ball_name]
+    racket_center, racket_center_vel, racket_quat = _racket_body_state(env, racket_body_name)
+
+    origin = ball.data.root_pos_w[:, :3]
+    v_in = ball.data.root_lin_vel_w[:, :3]
+    local_normal = torch.zeros_like(origin)
+    local_normal[:, 1] = 1.0
+    n_actual = quat_rotate(racket_quat, local_normal)
+    n_actual = n_actual / torch.norm(n_actual, dim=-1, keepdim=True).clamp(min=1.0e-6)
+
+    rel_n = torch.sum((v_in - racket_center_vel) * n_actual, dim=-1, keepdim=True)
+    v_out_pred = v_in - (1.0 + restitution) * rel_n * n_actual
+
+    land_x, land_y, valid = predict_landing_xy(
+        origin, v_out_pred, table_z=target_z, drag_k=drag_k, lin_damp=lin_damp,
+        control_dt=env.step_dt,
+    )
+    lx = land_x - env.scene.env_origins[:, 0]
+    ly = land_y - env.scene.env_origins[:, 1]
+    score = torch.exp(
+        -((lx - target_x) ** 2 / (2.0 * sigma_x**2) + (ly - target_y) ** 2 / (2.0 * sigma_y**2))
+    )
+    score = torch.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
+
+    forward = -float(robot_side) * v_out_pred[:, 0] > 0.0
+    dist = torch.norm(racket_center - origin, dim=-1)
+    incoming = ball.data.root_lin_vel_w[:, 0] * float(robot_side) > 0.0
+    active = (dist < proximity_gate) & incoming & valid & forward & ~env._sac_hit & ~env._sac_miss
+    return torch.where(active, score, torch.zeros_like(score))
+
+
 def sac_event_reward(env: ManagerBasedRLEnv, event: str) -> torch.Tensor:
     _ensure_tracker(env)
     bit = EVENT_TO_BIT[event]
@@ -326,28 +549,43 @@ def sac_table_proximity(
     table_x_min: float = 0.0,
     table_x_max: float = 1.37,
     table_y_half: float = 0.7625,
-    sigma: float = 8.0,
+    scale: float = 1.0,
+    floor: float = -1.0,
 ) -> torch.Tensor:
-    """Tier-1 (``bad_hit`` event) bootstrap: how close the post-hit ball came to the opponent table.
+    """Tier-1 (``bad_hit`` event) DTR bridge: SIGNED forward progress past the net.
 
-    Fires on the ``bad_hit`` outcome using the cached ball xy at first post-hit descent through
-    table height (``_sac_table_cross_x/y``). Scores ``exp(-sigma * d^2)`` where ``d`` is the
-    distance from that crossing point to the *nearest point of the opponent-table rectangle*
-    (clamped distance to the box ``[table_x_min, table_x_max] x [-table_y_half, table_y_half]``),
-    so a ball that lands just short / off the table still gets a smooth terminal gradient toward
-    a real return. Replaces the per-step ``post_hit_landing_prediction`` dense term. ``target_x``
-    is accepted for cfg symmetry with the placement terms but the score is box-distance based.
+    This term fires only on ``bad_hit``; a ball that lands in the opponent court is a
+    ``valid_return`` instead, so the firing domain is dominated by balls that came down on the
+    robot's *own* side (short of the net) or out of bounds. The previous unsigned box-distance
+    DTR paid a short lob a *positive* score (a landing 0.5 m short of the net scored +0.5),
+    which actively rewarded the touch-and-lob local optimum.
+
+    The score is now the landing's signed forward progress from the opponent-table near edge
+    (= net plane, ``x = table_x_min``), normalized by ``scale``:
+
+        x_progress = (cross_x - table_x_min) / scale            # <0 short of net, 0 at net, >0 past
+        y_miss     = max(|cross_y| - table_y_half, 0) / scale   # lateral-out penalty, else 0
+        score      = clamp(x_progress - y_miss, floor, 1.0)
+
+    So an own-side / short landing is strictly negative and grows toward 0 as it nears the net,
+    giving a constant, non-vanishing gradient that pulls the post-hit landing *forward over the
+    net* -- the direction that turns a bad_hit into a valid_return. ``floor`` caps the worst
+    short/wide ball; ``target_x`` is accepted for cfg symmetry with the placement terms but is
+    unused here.
+
+    NaN crossing (ball never descended through table height before the bad_hit, e.g. a timeout
+    while still airborne) maps to a neutral 0, not the floor.
     """
     _ensure_tracker(env)
     fired = (env._sac_step_event_mask & EVENT_TO_BIT["bad_hit"]) != 0
     cross_x = env._sac_table_cross_x
     cross_y = env._sac_table_cross_y
-    # Distance from the crossing point to the nearest point of the opponent-table rectangle
-    # ([table_x_min, table_x_max] x [-table_y_half, table_y_half]); zero inside the box.
-    dx = cross_x - cross_x.clamp(min=table_x_min, max=table_x_max)
-    dy = cross_y - cross_y.clamp(min=-table_y_half, max=table_y_half)
-    dist_sq = dx * dx + dy * dy
-    score = torch.exp(-sigma * dist_sq)
+    # Signed forward progress from the opponent-table near edge (= net plane, x = table_x_min):
+    # own-side / short-of-net landings go negative, reaching the table crosses zero.
+    x_progress = (cross_x - table_x_min) / max(scale, 1.0e-6)
+    # Lateral miss beyond the table half-width is a pure penalty (0 while within the sidelines).
+    y_miss = (cross_y.abs() - table_y_half).clamp(min=0.0) / max(scale, 1.0e-6)
+    score = (x_progress - y_miss).clamp(min=floor, max=1.0)
     score = torch.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
     return torch.where(fired, score, torch.zeros_like(score))
 

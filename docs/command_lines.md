@@ -4,6 +4,7 @@ Start training with the following command:
     --headless \
     --task A1-TableTennis-SAC-Catch \
     --num_envs 1024 \
+    --start_steps 128000 \
     --max_updates 500000 \
     --log_interval 100 \
     --checkpoint_interval 20000
@@ -50,7 +51,7 @@ Play with a trained agent:
     --episodes 20 \
     --max_steps 500 \
     --real_time \
-    --checkpoint logs/sac_table_tennis/A1-TableTennis-SAC-Catch/2026-06-10_17-13-09/checkpoints/agent_0010000.pt \
+    --checkpoint logs/sac_table_tennis/A1-TableTennis-SAC-Catch/2026-06-23_11-22-47/checkpoints/agent_best.pt
 ```
 
 ```

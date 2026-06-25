@@ -27,7 +27,7 @@ def Xform "PingPongBall"
         float physics:linearDamping = 0
         float physics:mass = 0.0027
         uniform token physics:physicsMaterialPurpose = "default"
-        float physics:restitution = 0.8
+        float physics:restitution = 0.4
         token physics:restitutionCombineMode = "max"
         bool physics:rigidBodyEnabled = 1
         float physics:staticFriction = 0.3

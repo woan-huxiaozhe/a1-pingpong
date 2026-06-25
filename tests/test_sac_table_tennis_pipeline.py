@@ -1,4 +1,4 @@
-"""Pure-function (no Isaac) checks for the Ace three-tier SAC reward ladder.
+"""Pure-function (no Isaac) checks for the sparse/event-heavy SAC reward ladder.
 
 The reward functions in ``mdp/rewards.py`` import ``isaaclab`` transitively, which is not
 available in CI. These tests therefore re-implement the *pure* numerical kernel of each new
@@ -7,7 +7,7 @@ tensors and ``_sac_step_event_mask``), mirroring the source one-to-one. They gua
 properties the refactor depends on:
 
   (a) each terminal reward fires only under its own event bit;
-  (b) the outcome ladder is monotone: miss < hit-tier total < return-tier total;
+  (b) the active outcome ladder is monotone: miss/no reward < hit < cross-net < valid return;
   (c) ``racket_spin_penalty`` rises with contact angular velocity;
   (d) the ungated ``landing_placement`` scores an edge landing and a center landing equally
       (i.e. removing the center gate makes placement depend only on landing position).
@@ -43,13 +43,13 @@ def miss_approach(env, sigma=8.0):
     return torch.where(fired, score, torch.zeros_like(score))
 
 
-def table_proximity(env, table_x_min=0.0, table_x_max=1.37, table_y_half=0.7625, sigma=8.0):
+def table_proximity(env, table_x_min=0.0, table_x_max=1.37, table_y_half=0.7625, scale=1.0, floor=-1.0):
     fired = _fired(env, "bad_hit")
     cross_x = env._sac_table_cross_x
     cross_y = env._sac_table_cross_y
-    dx = cross_x - cross_x.clamp(min=table_x_min, max=table_x_max)
-    dy = cross_y - cross_y.clamp(min=-table_y_half, max=table_y_half)
-    score = torch.exp(-sigma * (dx * dx + dy * dy))
+    x_progress = (cross_x - table_x_min) / max(scale, 1.0e-6)
+    y_miss = (cross_y.abs() - table_y_half).clamp(min=0.0) / max(scale, 1.0e-6)
+    score = (x_progress - y_miss).clamp(min=floor, max=1.0)
     score = torch.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
     return torch.where(fired, score, torch.zeros_like(score))
 
@@ -125,26 +125,23 @@ def test_each_reward_fires_only_under_its_event_bit():
     assert torch.all(fr[[0, 1, 2]] == 0.0)
 
 
-def test_ladder_is_monotone_miss_lt_hit_tier_lt_return_tier():
+def test_ladder_is_monotone_miss_lt_hit_lt_cross_net_lt_return_tier():
     weights = {
-        "miss_approach": 5.0,
-        "hit_bonus": 15.0,
-        "table_proximity": 10.0,
-        "racket_spin_penalty": -5.0,
-        "return_bonus": 50.0,
+        "hit_bonus": 20.0,
+        "return_cross_net": 40.0,
+        "table_proximity": 5.0,
+        "racket_spin_penalty": -2.0,
+        "return_bonus": 100.0,
         "landing_placement": 25.0,
         "flat_return": 10.0,
     }
-    # Best-case miss (closest possible approach).
-    env = _make_env(1)
-    env._sac_step_event_mask[0] = EVENT_TO_BIT["miss"]
-    env._sac_min_dist[0] = 0.0
-    miss_total = weights["miss_approach"] * float(miss_approach(env)[0])
+    # Miss has no active positive reward in the sparse/event-heavy pass.
+    miss_total = 0.0
 
     # Best-case hit tier (bad_hit): hit_bonus const + perfect table_proximity, zero spin penalty.
     env = _make_env(1)
     env._sac_step_event_mask[0] = EVENT_TO_BIT["hit"] | EVENT_TO_BIT["bad_hit"]
-    env._sac_table_cross_x[0] = 0.6  # inside opponent table -> distance 0 -> factor 1
+    env._sac_table_cross_x[0] = 1.0
     env._sac_table_cross_y[0] = 0.0
     env._sac_hit_racket_ang_vel[0] = 0.0  # cleanest contact -> no penalty
     hit_total = (
@@ -153,26 +150,32 @@ def test_ladder_is_monotone_miss_lt_hit_tier_lt_return_tier():
         + weights["racket_spin_penalty"] * float(racket_spin_penalty(env)[0])
     )
 
+    # A crossed-net return should dominate a bad-hit bridge.
+    cross_total = weights["hit_bonus"] + weights["return_cross_net"]
+
     # Best-case return tier (a valid_return also implies the hit event fired earlier).
     env = _make_env(1)
-    env._sac_step_event_mask[0] = EVENT_TO_BIT["hit"] | EVENT_TO_BIT["valid_return"]
+    env._sac_step_event_mask[0] = EVENT_TO_BIT["hit"] | EVENT_TO_BIT["return"] | EVENT_TO_BIT["valid_return"]
     env._sac_landing_x[0] = 0.6  # at target center -> placement 1
     env._sac_landing_y[0] = 0.0
     env._sac_post_hit_max_height[0] = 0.9  # flat drive -> flat_return 1
     env._sac_hit_racket_ang_vel[0] = 0.0
     return_total = (
-        weights["return_bonus"] * 1.0
+        weights["hit_bonus"] * 1.0
+        + weights["return_cross_net"] * 1.0
+        + weights["return_bonus"] * 1.0
         + weights["landing_placement"] * float(landing_placement(env, target_x=0.6)[0])
         + weights["flat_return"] * float(flat_return(env)[0])
         + weights["racket_spin_penalty"] * float(racket_spin_penalty(env)[0])
     )
 
     assert miss_total < hit_total, (miss_total, hit_total)
-    assert hit_total < return_total, (hit_total, return_total)
+    assert hit_total < cross_total, (hit_total, cross_total)
+    assert cross_total < return_total, (cross_total, return_total)
     # Effective-value (post step_dt) ladder caps from the plan also hold.
-    assert miss_total * 0.02 <= 0.10 + 1e-9
-    assert math.isclose(weights["hit_bonus"] * 0.02, 0.30)
-    assert math.isclose(weights["return_bonus"] * 0.02, 1.00)
+    assert math.isclose(weights["hit_bonus"] * 0.02, 0.40)
+    assert math.isclose(weights["return_cross_net"] * 0.02, 0.80)
+    assert math.isclose(weights["return_bonus"] * 0.02, 2.00)
 
 
 def test_racket_spin_penalty_rises_with_angular_velocity():

@@ -16,7 +16,15 @@ parser.add_argument("--task", type=str, default="A1-TableTennis-SAC-Catch")
 parser.add_argument("--num_envs", type=int, default=1024)
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--max_updates", type=int, default=30_000)
-parser.add_argument("--start_steps", type=int, default=20_000, help="Random-action transitions before SAC updates.")
+parser.add_argument(
+    "--start_steps",
+    type=int,
+    default=128_000,
+    help=(
+        "Random-action transitions before SAC updates. With the default 1024 envs this is "
+        "about one full 2.5s episode, so sparse/event rewards see real random outcomes before learning starts."
+    ),
+)
 parser.add_argument("--batch_size", type=int, default=4096)
 parser.add_argument("--replay_size", type=int, default=1_000_000)
 parser.add_argument("--event_table_size", type=int, default=250_000)

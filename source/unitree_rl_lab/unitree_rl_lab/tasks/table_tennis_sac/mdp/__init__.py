@@ -7,6 +7,9 @@ from .events import *  # noqa: F401, F403
 from .observations import *  # noqa: F401, F403
 from .rewards import *  # noqa: F401, F403
 from .rewards import (  # noqa: F401  explicit re-export of the Ace three-tier terminal rewards
+    racket_ideal_normal_match,
+    racket_ideal_velocity_match,
+    racket_predicted_landing,
     sac_flat_return,
     sac_miss_approach,
     sac_racket_spin_penalty,

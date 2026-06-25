@@ -1,6 +1,6 @@
 # A1 Table Tennis SAC Training Architecture
 
-Last updated: 2026-06-17
+Last updated: 2026-06-25
 
 This document is the architecture note for the independent SAC table-tennis pipeline. When the SAC task's observation, action, reward, replay, event logic, latency model, training loop, or TensorBoard logging changes, update this file in the same change.
 
@@ -20,7 +20,7 @@ Current non-goals:
 - No `ReferenceResidualJointAction`.
 - No HER in active training yet. HER reward recomputation exists only as a scaffold.
 - Actor now receives a deployment-style estimated hit command; critic additionally receives the clean simulator hit command.
-- No serve randomization, spin, target-y curriculum, or real sensor latency model yet.
+- No spin, target-y curriculum, or real sensor latency model yet. The current recovery curriculum uses a narrow fixed-box serve randomization; real-serve table sampling exists but is disabled by `SAC_USE_SERVE_STATES = False`.
 
 Main entry points:
 
@@ -64,17 +64,50 @@ Current incoming ball:
 
 ```python
 SAC_FIXED_MIDDLE_BALL = {
-    "x_range": (1.25, 1.25),
-    "y_range": (0.0, 0.0),
-    "z_range": (1.05, 1.05),
-    "vx_range": (-3.4, -3.4),
+    "x_range": (1.0, 1.0),
+    "y_range": (-0.05, 0.15),
+    "z_range": (1.08, 1.18),
+    "vx_range": (3.8 * ROBOT_SIDE, 4.3 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
-    "vz_range": (1.57, 1.57),
+    "vz_range": (1.05, 1.35),
 }
 ```
 
-The ball is reset once per episode by `launch_ball`. It now starts near the opponent-side table edge instead of spawning close to the middle of the table, because the previous `x=0.35, z=1.10, vx=-2.4, vz=0.2` setup tended to land on the robot half too early and could show repeated bounces on the robot side before the arm interacted with it.
-With the current fixed ball and `SAC_ROBOT_X = -1.47`, the analytic bounce model predicts a table bounce around `x = -0.284 m` and a strike-plane height of about `1.06 m` after `0.80 s`, slightly above the current ready-pose paddle-center height.
+The ball is reset once per episode by `launch_ball`. `env_cfg.py` exposes both
+the fixed range box above and the real-data reset table path
+`SAC_SERVE_STATES_PATH = serve_states_x1.npz`. In the current checkout,
+`SAC_USE_SERVE_STATES = False`, so `launch_ball` samples independently from the
+narrow fixed range box above. This is an easier recovery curriculum after the
+real-serve run learned soft/bad hits. Set the flag to `True` to sample rows from
+the real-data table.
+
+The current real-serve dynamics use `SAC_BALL_LINEAR_DAMPING = 0.05` plus an
+interval air-drag event with `SAC_BALL_DRAG_K = 0.08`. These values came from
+the IsaacSim validation scan against the filtered real trajectories after the
+table restitution was raised to `0.95`.
+
+`create_serve_states.py` builds this optional table from VRPN trajectories. It
+extracts the measured state at `x=1.0`, samples with an empirical bootstrap,
+KDE, or multivariate Gaussian model, and rejects candidates that do not clear
+the net, do not produce the configured number of table bounces, or arrive
+outside the reachable `SAC_ROBOT_X = -1.47` hit window. The default generator
+keeps both the full-serve pre-bounce branch and the post-bounce incoming branch;
+use `--post-bounce-only` only for a conservative one-bounce curriculum that
+starts after the opponent-side table bounce. The real-trajectory filtering,
+IsaacSim validation, damping/drag scans, and measured error tables are recorded
+in `docs/sac_real_serve_state_pipeline.md`.
+
+Default full-serve generation command:
+
+```bash
+/data/miniforge3/envs/isaac/bin/python \
+  source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/create_serve_states.py \
+  --data-dir /home/woan/kalman_filter_pingpong/data/0611_data_vel \
+             /home/woan/kalman_filter_pingpong/data/0617_traj_data \
+  --velocity-source file \
+  --max-opponent-bounces 1 \
+  --num-states 5000
+```
 
 Robot reset:
 
@@ -84,7 +117,7 @@ Robot reset:
 - A static USD joint-anchor FK check estimates the current ready-pose paddle-center height at about `1.016 m`; the fixed ball above is tuned to cross `x = -1.47` slightly above that height.
 - The controlled right arm is reset to `SAC_READY_JOINT_POS`.
 - Current ready pose:
-  - `[1.53, -0.39, 1.60, -1.32, 0.0, 1.0, -1.845288]`
+  - `[1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]`
 - Joint velocities are reset to zero.
 - The `JointDeltaTargetAction` internal target is also reset so the first post-reset action is relative to the ready pose, not to the previous episode's target.
 
@@ -235,41 +268,44 @@ Joint targets are clamped by the action term. Joint-limit termination is current
 
 ## 5. Reward
 
-IsaacLab reward terms are configured in `RewardsCfg`. As of the Ace refactor (`feat/sony-ace`), the reward is a **mutually-exclusive three-tier terminal ladder** plus a fixed set of sim-to-real smoothing regularizers. Almost every shaping term now fires **once on its event step** (via `_sac_step_event_mask` bit gating) using a cached quantity, instead of accumulating per step. The IsaacLab `RewardManager` multiplies each weight by `step_dt = 0.02`, so the "effective" per-event value is `weight * 0.02`; equivalently `weight = effective / 0.02`.
+IsaacLab reward terms are configured in `RewardsCfg`. As of the 2026-06-25 lob-plateau pass, the default reward is a **sparse/event-heavy ladder** plus small terminal shaping on actual outcomes and fixed sim-to-real regularizers. The three pre-contact approach-window dense proxies (`racket_ideal_velocity_match`, `racket_ideal_normal_match`, `racket_predicted_landing`) are unwired by default because they optimized an ideal-looking non-contact pose rather than the contact frame that determines return quality. The IsaacLab `RewardManager` multiplies each weight by `step_dt = 0.02`, so the "effective" per-event value is `weight * 0.02`; equivalently `weight = effective / 0.02`.
 
-Design intent (borrowed from Sony "Ace", Nature 2026): structure, not term count. Three mutually-exclusive outcome groups, one terminal guidance term per group, a monotone ladder so a better outcome always dominates, clean contact enforced by a *physical* quantity (racket angular speed at contact) instead of a geometric center gate, and all exploration guidance removed from the reward (left to OU noise / seeding / event replay, see Roadmap). The `miss` outcome is a small positive approach bonus rather than a negative penalty, so the policy is never incentivized to end an episode early to dodge a penalty.
+Design intent: use random warmup, entropy, and event replay for exploration; use high-weight events to decide credit. The reward should no longer pay the policy every approach-window step for proxy kinematics. A better outcome must dominate a worse one: hit < cross-net return < valid return. `miss_approach` is disabled because it paid positive reward for near-missing, a mutually-exclusive non-goal.
 
-The ladder does not overlap: `tier0 <= +0.10  <  tier1 const +0.30 (tier1 cap ~+0.50)  <  tier2 const +1.00`.
+The event ladder is anchored by `hit_bonus` (+0.40), `return_cross_net` (+0.80), and `return_bonus` for `valid_return` (+2.00). Placement/flatness bonuses only fire after a real `valid_return`.
 
 | Tier | Event | Term | Func | Weight | Effective | Meaning |
 | --- | --- | --- | --- | ---: | ---: | --- |
-| 0 miss | `miss` | `miss_approach` | `sac_miss_approach` | `5.0` | `0 -> +0.10` | `exp(-sigma * min_dist^2)` on the terminal closest racket-ball distance (`sigma = 8.0`). Replaces the old `-0.10` miss penalty and the disabled pre-hit shaping; gives a chase gradient without a negative reward. |
-| 1 hit, no return | `hit` | `hit_bonus` | `sac_event_reward(event="hit")` | `15.0` | `+0.30` | Ladder constant for making any clean contact. |
-| 1 | `bad_hit` | `table_proximity` | `sac_table_proximity` | `10.0` | `0 -> +0.20` | `exp(-sigma * d^2)` where `d` is the distance from the cached first post-hit table-height crossing (`_sac_table_cross_x/y`) to the nearest point of the opponent-table rectangle (`sigma = 8.0`). Terminal bootstrap replacing the per-step `post_hit_landing_prediction`. |
-| 1/2 | `hit` | `racket_spin_penalty` (R_omega) | `sac_racket_spin_penalty` | `-5.0` | `0 -> -0.10` | `clamp(racket_ang_vel_at_contact / scale, 0, 1)` (`scale = 12.0` rad/s). Physical clean-contact term replacing the entire center-gate subsystem; fires once on the hit event so it is shared across the bad_hit and valid_return outcomes of that hit. |
-| 2 valid return | `valid_return` | `return_bonus` | `sac_event_reward(event="valid_return")` | `50.0` | `+1.00` | Top ladder constant, far above the tier-1 cap. |
+| 1 hit | `hit` | `hit_bonus` | `sac_event_reward(event="hit")` | `20.0` | `+0.40` | Ladder constant for making contact. |
+| 1 return bridge | `return` | `return_cross_net` | `sac_event_reward(event="return")` | `40.0` | `+0.80` | Event bridge for a hit ball crossing the net before final landing. |
+| 1 bad hit bridge | `bad_hit` | `table_proximity` | `sac_table_proximity` | `5.0` | `-0.10 -> +0.10` | Signed terminal progress at the first post-hit table-height crossing. Own-side/short landings are negative; crossing toward the opponent side is positive. |
+| 1/2 | `hit` | `racket_spin_penalty` (R_omega) | `sac_racket_spin_penalty` | `-2.0` | `0 -> -0.04` | Small hit-time angular-velocity penalty. Kept weaker during sparse exploration so it does not suppress useful exploratory swings. |
+| 2 valid return | `valid_return` | `return_bonus` | `sac_event_reward(event="valid_return")` | `100.0` | `+2.00` | Top ladder constant, far above the hit and cross-net bridge. |
 | 2 | `valid_return` | `landing_placement` | `sac_landing_placement` | `25.0` | `0 -> +0.50` | Gaussian on actual landing vs opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`). **No center gate** (`center_sigma`/`center_gate_floor` left at default `0`). |
 | 2 | `valid_return` | `flat_return` | `sac_flat_return` | `10.0` | `0 -> +0.20` | `clamp((ref_height - post_hit_max_height) / band, 0, 1)` (`ref_height = 1.4 m`, `band = 0.4 m`): a flat drive scores high, a lob scores 0. Positive-terminal replacement for the disabled `post_hit_lob_penalty`. |
-| reg | every step | `action_rate` | `action_rate_l2` | `-0.03` | regularizer | Penalizes action changes. |
-| reg | every step | `joint_acc` | `joint_acc_l2` | `-2e-5` | regularizer | Penalizes joint acceleration. |
-| reg | every step | `joint_jerk` | `joint_jerk_l2` | `-5e-9` | regularizer | Penalizes joint jerk (single-step acceleration reversals). |
+| reg | every step | `action_rate` | `action_rate_l2` | `-0.005` | regularizer | Penalizes action changes. |
+| reg | every step | `joint_acc` | `joint_acc_l2` | `-1e-6` | regularizer | Penalizes joint acceleration. |
+| reg | every step | `joint_jerk` | `joint_jerk_l2` | `-2e-10` | regularizer | Penalizes joint jerk (single-step acceleration reversals). |
 | reg | every step | `joint_limit` | `joint_limit_margin_penalty` | `-3.0` | barrier | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
-| reg | every step | `joint_effort_margin` | `joint_effort_margin_penalty` | `-3.0` | barrier | Penalizes torques approaching `85%` of each joint's effort limit. |
+| reg | every step | `joint_effort_margin` | `joint_effort_margin_penalty` | `-0.5` | barrier | Penalizes torques approaching `85%` of each joint's effort limit. Reduced from `-3.0` for the fixed-box recovery curriculum so effort pressure does not suppress the swing before sparse return rewards become common. |
 
 Unwired terms (function bodies kept in `rewards.py` as ablation hooks; only the `RewardsCfg` wiring is commented out, per repo convention) and why:
 
 | Unwired term | Old weight | Why removed |
 | --- | ---: | --- |
-| `hit` (small const) | `2.0` | Subsumed by the tier-1 `hit_bonus` (`15.0`). |
+| `hit` (small const) | `2.0` | Subsumed by the tier-1 `hit_bonus` (`20.0`). |
 | `quality_hit` | `20.0` | Outgoing-speed + vertical gate is now implicit: the only way to earn the much larger return ladder is a returnable hit, so a separate speed-quality term is redundant and was a hack surface. |
 | `hit_centered` | `8.0` | Center contact is now enforced physically by `racket_spin_penalty`, not by an additive center bonus. |
-| `return_cross_net` | `15.0` | Net-crossing is a strict subset of `valid_return`; rewarding it separately double-counted and let a ball that crossed but did not land farm reward. |
-| `valid_return` (old wiring) | `25.0` | Re-wired as `return_bonus` at the higher top-of-ladder constant (`50.0`). |
+| `miss_approach` | `5.0` | Paid positive reward for near-missing, a non-goal that is mutually exclusive with return. |
+| `valid_return` (old wiring) | `25.0` | Re-wired as `return_bonus` at the higher top-of-ladder constant (`100.0`). |
 | `landing_placement` (center-gated) | `25.0` | Re-wired identically but with the multiplicative center gate removed. |
-| `miss` (penalty) | `-5.0` | Replaced by the positive `miss_approach`; negative outcome penalties invite early-termination exploits (repo history saw a joint-limit termination exploit). |
-| `bad_hit` (penalty) | `-3.0` | Replaced by the positive `table_proximity` bootstrap; the ladder is driven by constants, not penalties. |
+| `miss` (penalty) | `-5.0` | Disabled; negative outcome penalties invite early-termination exploits (repo history saw a joint-limit termination exploit). |
+| `bad_hit` (penalty) | `-3.0` | Replaced by the signed `table_proximity` bridge; the ladder is driven mainly by event constants, not penalties. |
 | `post_hit_net_clearance` | `1.0` | Per-step dense predictor that dominated `reward/total_mean` with noise; replaced by the terminal `table_proximity`. |
 | `post_hit_landing_prediction` | `5.0` | Same: per-step dense predictor replaced by terminal `table_proximity`. |
+| `racket_ideal_velocity_match` | `10.0` | Approach-window dense proxy; v1/v2 showed it can be optimized without producing a committed contact-frame return. |
+| `racket_ideal_normal_match` | `8.0` | Approach-window dense proxy; v2 reached very high proxy scores while `valid_return` stayed near zero. |
+| `racket_predicted_landing` | `12.0` | Approach-window "if hit now" predictor; the scored instant can differ from the actual contact instant. |
 | pre-hit shaping (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) | `0.0` | Already disabled pre-Ace; exploration guidance is intentionally not in the reward. |
 
 Center-gate -> R_omega migration. Through 2026-06-11/16/18 the team repeatedly retuned a multiplicative center-contact gate (`_center_gate_factor`, `SAC_CENTER_SIGMA = 400`, `SAC_CENTER_GATE_FLOOR = 0.15`) on `quality_hit` and `landing_placement`, plus an additive `hit_centered` term, yet `hit_center_offset_mean` stayed stuck at ~7.6 cm and the policy showed converged-but-oscillating behaviour (`docs/sac_catch_oscillation_diagnosis.md`). The Ace refactor replaces the whole gate subsystem with `racket_spin_penalty` (R_omega): a fast wrist spin at contact is what destabilizes a clean, flat blade face and is highly sim-specific, so penalizing the cached racket angular speed at first contact targets the *cause* of dirty edge contact with a smooth physical gradient rather than a multiplicative geometric cliff. `SAC_CENTER_SIGMA` / `SAC_CENTER_GATE_FLOOR` remain defined in `env_cfg.py` for the disabled center terms but are not referenced by any active reward. `hit_center_offset` is still cached and logged as a diagnostic metric (it does not enter the reward).
@@ -379,15 +415,20 @@ Default stratified sampling ratios:
 
 | Source | Ratio |
 | --- | ---: |
-| `uniform` | `0.40` |
-| `near_miss` | `0.25` |
-| `hit` | `0.20` |
-| `return` | `0.05` |
-| `valid_return` | `0.05` |
-| `miss` | `0.025` |
-| `bad_hit` | `0.025` |
+| `uniform` | `0.30` |
+| `near_miss` | `0.10` |
+| `hit` | `0.10` |
+| `return` | `0.15` |
+| `valid_return` | `0.25` |
+| `miss` | `0.05` |
+| `bad_hit` | `0.05` |
 
 If an event table is empty or contains invalid overwritten slots, the missing portion falls back to uniform replay.
+
+The current ratio is return-heavy on purpose. The real-serve failure mode showed plenty of
+`hit` windows but very few useful returns, so continuing to oversample generic contacts
+reinforced soft/bad hits. Missing `return` / `valid_return` samples fall back to uniform
+until those event tables contain usable windows.
 
 ## 8. SAC Algorithm
 
@@ -396,7 +437,9 @@ Implementation: custom PyTorch SAC in `sac.py`.
 Actor:
 
 - Tanh-squashed Gaussian policy.
-- Network outputs mean and log standard deviation.
+- Shared MLP trunk with two heads:
+  - policy head outputs mean and log standard deviation,
+  - auxiliary reconstruction head predicts the critic-only clean/private observation block.
 - `log_std` is clamped to `[-5, 2]`.
 - Stochastic action uses reparameterized sampling.
 - Deterministic playback uses `tanh(mean)`.
@@ -420,11 +463,24 @@ critic_loss = mse(q1(obs_critic, action), backup) \
             + mse(q2(obs_critic, action), backup)
 
 new_action, log_prob = actor.sample(obs_actor)
-actor_loss = (alpha * log_prob - min(q1(obs_critic, new_action),
-                                     q2(obs_critic, new_action))).mean()
+policy_loss = (alpha * log_prob - min(q1(obs_critic, new_action),
+                                      q2(obs_critic, new_action))).mean()
+aux_loss = smooth_l1(actor.reconstruct_aux(obs_actor),
+                     normalized(obs_critic[:, actor_obs_dim:]))
+actor_loss = policy_loss + aux_reconstruction_coef * aux_loss
 
 alpha_loss = -(log_alpha * (log_prob + target_entropy).detach()).mean()
 ```
+
+Auxiliary reconstruction is Ace-inspired asymmetric supervision, not a new reward.
+The target is the critic-private block after the actor-visible observation prefix:
+joint velocity, clean ball velocity, clean racket linear/angular velocity, clean
+ball-racket relative velocity, full racket axes, and clean hit command. These are
+scaled before `smooth_l1` so velocity terms do not dominate. The loss updates the
+actor trunk and auxiliary head only; the critic targets and environment reward are
+unchanged. The intended effect is to make the deployable actor features encode timing
+and hidden velocity information that the sparse `valid_return` reward exposes only
+rarely.
 
 Default hyperparameters:
 
@@ -438,11 +494,12 @@ Default hyperparameters:
 | alpha lr | `3e-4` |
 | gamma | `0.98` |
 | tau | `0.005` |
-| initial alpha | `0.02` |
-| min alpha | `0.02` |
+| initial alpha | `0.10` |
+| min alpha | `0.10` |
 | target entropy | `-action_dim = -7` |
+| aux reconstruction coef | `0.05` |
 
-The `min_alpha` floor was added to avoid entropy collapsing too early while rare events are still sparse.
+The `min_alpha` floor is intentionally high in the sparse/event-heavy pass so entropy does not collapse before random exploration and event replay discover enough contact/return windows.
 
 ## 9. Training Loop
 
@@ -464,7 +521,7 @@ Important CLI defaults:
 | --- | ---: |
 | `--seed` | `1` |
 | `--max_updates` | `30000` |
-| `--start_steps` | `20000` transitions |
+| `--start_steps` | `128000` transitions |
 | `--batch_size` | `4096` |
 | `--replay_size` | `1000000` |
 | `--event_table_size` | `250000` |
@@ -485,7 +542,7 @@ Loop behavior:
 8. Log losses, replay size, event-table sizes, batch composition, and episode metrics.
 9. Save checkpoints periodically and at the end.
 
-`max_updates` counts gradient updates, not environment steps. `train/transitions` increases roughly linearly by `num_envs` every env step; this is expected.
+`max_updates` counts gradient updates, not environment steps. `train/transitions` increases roughly linearly by `num_envs` every env step; this is expected. With the default `--num_envs 1024`, `--start_steps 128000` is about one full 2.5 s episode of random actions before SAC updates begin.
 
 ## 10. TensorBoard Cards
 
@@ -494,7 +551,9 @@ The SAC TensorBoard output is split by purpose. The card count is intentional: `
 Loss cards:
 
 - `loss/critic_loss`: twin critic Bellman MSE sum.
-- `loss/actor_loss`: entropy-regularized actor objective.
+- `loss/actor_loss`: total actor objective (`policy_loss + aux_reconstruction_coef * aux_reconstruction_loss`).
+- `loss/policy_loss`: entropy-regularized SAC actor objective before the auxiliary term.
+- `loss/aux_reconstruction_loss`: Smooth L1 reconstruction loss from actor features to the scaled critic-private observation block.
 - `loss/actor_grad_norm`: actor gradient L2 norm measured just before the optimizer step.
 - `loss/critic_grad_norm`: combined twin-critic gradient L2 norm measured just before the optimizer step.
 - `loss/alpha_loss`: temperature tuning loss.
@@ -548,14 +607,13 @@ These are weighted reward terms from IsaacLab's `RewardManager`, averaged over e
 - `reward_terms/racket_approach`: disabled pre-hit closing-speed ablation hook.
 - `reward_terms/racket_face_target`: disabled pre-hit face-alignment ablation hook.
 - `reward_terms/racket_normal_swing`: disabled pre-hit normal-swing ablation hook.
-- `reward_terms/hit`: sparse contact reward.
-- `reward_terms/quality_hit`: first-contact basic outgoing-quality reward from outgoing speed plus a shallow non-downward gate.
-- `reward_terms/hit_centered`: first-contact centeredness reward from cached in-plane ball-to-blade-center offset.
-- `reward_terms/return_cross_net`: sparse crossed-net reward after hit.
-- `reward_terms/valid_return`: sparse valid-return reward.
+- `reward_terms/hit_bonus`: sparse contact ladder constant.
+- `reward_terms/return_cross_net`: sparse crossed-net event bridge.
+- `reward_terms/table_proximity`: bad-hit terminal distance-to-opponent-table bootstrap.
+- `reward_terms/racket_spin_penalty`: hit-time racket angular-velocity penalty.
+- `reward_terms/return_bonus`: sparse valid-return ladder constant.
 - `reward_terms/landing_placement`: valid-return placement score at the actual landing point.
-- `reward_terms/miss`: no-hit miss penalty.
-- `reward_terms/bad_hit`: bad post-hit outcome penalty.
+- `reward_terms/flat_return`: valid-return low-arc bonus.
 - `reward_terms/post_hit_outgoing`: disabled outgoing-velocity ablation hook.
 - `reward_terms/post_hit_net_progress`: disabled post-hit net-progress hook.
 - `reward_terms/post_hit_net_clearance`: predicted net-clearance shaping.
@@ -563,7 +621,9 @@ These are weighted reward terms from IsaacLab's `RewardManager`, averaged over e
 - `reward_terms/post_hit_lob_penalty`: disabled high-arc penalty ablation hook.
 - `reward_terms/action_rate`: action-change penalty.
 - `reward_terms/joint_acc`: joint-acceleration penalty.
+- `reward_terms/joint_jerk`: joint jerk penalty.
 - `reward_terms/joint_limit`: joint-limit margin barrier penalty.
+- `reward_terms/joint_effort_margin`: effort-limit margin barrier penalty.
 
 Primary cards to watch during reward tuning:
 
@@ -577,13 +637,14 @@ Primary cards to watch during reward tuning:
 - `episode/hit_up_speed_mean`
 - `episode/post_hit_max_height_mean`
 - `reward_terms/joint_limit`
-- `reward_terms/hit`
-- `reward_terms/quality_hit`
-- `reward_terms/hit_centered`
+- `reward_terms/joint_effort_margin`
+- `reward_terms/hit_bonus`
+- `reward_terms/return_cross_net`
+- `reward_terms/racket_spin_penalty`
+- `reward_terms/return_bonus`
 - `reward_terms/landing_placement`
-- `reward_terms/post_hit_landing_prediction`
-- `reward_terms/post_hit_lob_penalty`
-- `reward_terms/miss`
+- `reward_terms/table_proximity`
+- `loss/aux_reconstruction_loss`
 
 ## 11. Latency Model
 

@@ -178,13 +178,13 @@ class EventReplayTable:
 
 
 DEFAULT_EVENT_RATIOS = {
-    "uniform": 0.40,
-    "near_miss": 0.25,
-    "hit": 0.20,
-    "return": 0.05,
-    "valid_return": 0.05,
-    "miss": 0.025,
-    "bad_hit": 0.025,
+    "uniform": 0.30,
+    "near_miss": 0.10,
+    "hit": 0.10,
+    "return": 0.15,
+    "valid_return": 0.25,
+    "miss": 0.05,
+    "bad_hit": 0.05,
 }
 
 

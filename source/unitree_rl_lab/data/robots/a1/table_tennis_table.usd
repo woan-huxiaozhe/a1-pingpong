@@ -150,7 +150,7 @@ def Xform "TableTennisTable"
     )
     {
         float physics:dynamicFriction = 0.35
-        float physics:restitution = 0.8
+        float physics:restitution = 0.95
         token physics:restitutionCombineMode = "max"
         float physics:staticFriction = 0.4
     }
@@ -184,4 +184,3 @@ def Xform "TableTennisTable"
         }
     }
 }
-

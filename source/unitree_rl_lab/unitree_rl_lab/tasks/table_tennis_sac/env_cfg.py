@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -56,13 +58,32 @@ SAC_CENTER_GATE_FLOOR = 0.15
 
 SAC_FIXED_MIDDLE_BALL = {
     "x_range": (-1.0 * ROBOT_SIDE, -1.0 * ROBOT_SIDE),
-    "y_range": (-0.1, 0.3),
-    "z_range": (1.1, 1.2),
-    "vx_range": (4.0 * ROBOT_SIDE, 5.0 * ROBOT_SIDE),
+    "y_range": (0.0, 0.20),
+    "z_range": (1.05, 1.25),
+    "vx_range": (3.8 * ROBOT_SIDE, 4.3 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
-    "vz_range": (1.0, 1.5),
+    "vz_range": (1.05, 1.35),
 }
 
+# slower
+# SAC_FIXED_MIDDLE_BALL = {
+#     "x_range": (-1.0 * ROBOT_SIDE, -1.0 * ROBOT_SIDE),
+#     "y_range": (-0.1, 0.3),
+#     "z_range": (0.8, 1.0),
+#     "vx_range": (3.0 * ROBOT_SIDE, 3.5 * ROBOT_SIDE),
+#     "vy_range": (0.0, 0.0),
+#     "vz_range": (2.5, 3.0),
+# }
+
+SAC_SERVE_STATES_PATH = os.path.join(os.path.dirname(__file__), "serve_states_x1.npz")
+SAC_USE_SERVE_STATES = False
+SAC_BALL_LINEAR_DAMPING = 0.05
+SAC_BALL_DRAG_K = 0.08
+SAC_BALL_RESET_PARAMS = (
+    {"ball_cfg": SceneEntityCfg("ball"), "serve_states_path": SAC_SERVE_STATES_PATH}
+    if SAC_USE_SERVE_STATES
+    else {"ball_cfg": SceneEntityCfg("ball"), **SAC_FIXED_MIDDLE_BALL}
+)
 
 @configclass
 class A1TableTennisSacSceneCfg(X1TableTennisSceneCfg):
@@ -185,32 +206,49 @@ class RewardsCfg:
     #         "proximity_gate": 0.45,
     #     },
     # )
-    # === Ace three-tier terminal reward ladder (effective = weight * step_dt(0.02)) ===
-    # Tiers do not overlap: tier0 <= +0.10 < tier1 const +0.30 (cap ~+0.50) < tier2 const +1.00.
+    # === Sparse/event-heavy reward ladder (effective = weight * step_dt(0.02)) ===
     #
-    # --- Tier 0: miss (漏球) -> small positive approach shaping, no negative penalty ---
-    # sigma=8.0 so a 0.10 m terminal approach -> ~0.92, 0.35 m -> ~0.37 (cap +0.10).
-    miss_approach = RewTerm(func=mdp.sac_miss_approach, weight=5.0, params={"sigma": 8.0})
+    # 0625 lob-plateau diagnosis: the approach-window dense terms
+    # (racket_ideal_velocity_match, racket_ideal_normal_match, racket_predicted_landing)
+    # were learnable proxies, but their optimum was "hold an ideal-looking paddle in the
+    # approach window", not "commit a flat drive through the contact frame". They are
+    # therefore unwired by default; re-enable them only in an explicit ablation.
+    #
+    # miss_approach is also unwired: it fired only on the mutually-exclusive miss event and
+    # paid the policy for near-missing, which encouraged hover/chase behavior instead of
+    # contact. Exploration now comes from random warmup, entropy, event replay, and the event
+    # ladder below.
 
-    # --- Tier 1: hit but no valid return (bad_hit) ---
-    hit_bonus = RewTerm(func=mdp.sac_event_reward, weight=15.0, params={"event": "hit"})  # +0.30 ladder const
-    table_proximity = RewTerm(  # +0.20 cap; sigma=8.0 so ~0.3 m off the table -> factor ~0.49
+    # --- Tier 1: make contact, then cross the net ---
+    hit_bonus = RewTerm(func=mdp.sac_event_reward, weight=20.0, params={"event": "hit"})  # +0.40
+    return_cross_net = RewTerm(func=mdp.sac_event_reward, weight=40.0, params={"event": "return"})  # +0.80
+    # quality_hit DISABLED: hit speed/up-speed proxies are too easy to satisfy with the same
+    # stereotyped lob; the active ladder scores real return events instead.
+    # quality_hit = RewTerm(
+    #     func=mdp.sac_quality_hit_reward,
+    #     weight=10.0,
+    #     params={"min_outgoing_speed": 1.0, "good_outgoing_speed": 3.0,
+    #             "min_up_speed": -0.2, "up_tolerance": 0.4},
+    # )
+    table_proximity = RewTerm(  # signed bad-hit bridge, effective [-0.10, +0.10]
         func=mdp.sac_table_proximity,
-        weight=10.0,
+        weight=5.0,
         params={
             "target_x": OPP_TABLE_CENTER_X,
             "table_x_min": OPP_TABLE_X[0],
             "table_x_max": OPP_TABLE_X[1],
             "table_y_half": 0.7625,
-            "sigma": 8.0,
+            "scale": 1.0,
+            "floor": -1.0,
         },
     )
-    # R_omega clean-contact penalty (replaces the center gate). scale=12.0 rad/s is a plausible
-    # blade angular speed at a stable drive contact; a faster wrist spin -> full -0.10.
-    racket_spin_penalty = RewTerm(func=mdp.sac_racket_spin_penalty, weight=-5.0, params={"scale": 12.0})
+    # R_omega clean-contact penalty is kept small while the sparse/event-heavy run is still
+    # searching for a committed swing; too much early wrist-spin pressure can suppress useful
+    # exploration before valid returns are common.
+    racket_spin_penalty = RewTerm(func=mdp.sac_racket_spin_penalty, weight=-2.0, params={"scale": 12.0})
 
     # --- Tier 2: valid return ---
-    return_bonus = RewTerm(func=mdp.sac_event_reward, weight=50.0, params={"event": "valid_return"})  # +1.00 const
+    return_bonus = RewTerm(func=mdp.sac_event_reward, weight=100.0, params={"event": "valid_return"})  # +2.00 const
     landing_placement = RewTerm(  # +0.50 cap; NO center gate (center_sigma/floor default 0)
         func=mdp.sac_landing_placement,
         weight=25.0,
@@ -229,20 +267,8 @@ class RewardsCfg:
     # Replaced by the three-tier ladder above. Old small hit const, center-gating subsystem,
     # per-step post_hit dense terms, and the flat miss/bad_hit penalties.
     # hit = RewTerm(func=mdp.sac_event_reward, weight=2.0, params={"event": "hit"})
-    # quality_hit = RewTerm(
-    #     func=mdp.sac_quality_hit_reward,
-    #     weight=20.0,
-    #     params={
-    #         "min_outgoing_speed": 1.5,
-    #         "good_outgoing_speed": 3.5,
-    #         "min_up_speed": -0.2,
-    #         "up_tolerance": 0.4,
-    #         "center_sigma": SAC_CENTER_SIGMA,
-    #         "center_gate_floor": SAC_CENTER_GATE_FLOOR,
-    #     },
-    # )
     # hit_centered = RewTerm(func=mdp.sac_centered_hit_reward, weight=8.0, params={"sigma": SAC_CENTER_SIGMA})
-    # return_cross_net = RewTerm(func=mdp.sac_event_reward, weight=15.0, params={"event": "return"})
+    # return_cross_net old wiring used weight=15.0; active sparse/event run uses 40.0.
     # valid_return = RewTerm(func=mdp.sac_event_reward, weight=25.0, params={"event": "valid_return"})
     # landing_placement (center-gated) = RewTerm(
     #     func=mdp.sac_landing_placement,
@@ -268,26 +294,21 @@ class RewardsCfg:
     #     weight=0.0,
     #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": SAC_ROBOT_X},
     # )
+    # post_hit_net_clearance / post_hit_landing_prediction DISABLED (feat/sony-ace ideal-
+    # velocity refactor): both use a GRAVITY-ONLY projectile solve, but the scene now has
+    # quadratic air drag (k=0.08) + linear_damping (0.05), so their landing prediction is
+    # systematically optimistic -- they paid partial credit to a high lob that never reaches
+    # the opponent table, cementing the touch-lob local optimum. The active sparse/event run
+    # relies on return_cross_net, valid_return, landing_placement, and flat_return instead.
     # post_hit_net_clearance = RewTerm(
-    #     func=mdp.post_hit_net_clearance,
-    #     weight=1.0,
+    #     func=mdp.post_hit_net_clearance, weight=1.0,
     #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE},
     # )
     # post_hit_landing_prediction = RewTerm(
-    #     func=mdp.post_hit_landing_prediction,
-    #     weight=5.0,
-    #     params={
-    #         "ball_name": "ball",
-    #         "robot_side": ROBOT_SIDE,
-    #         "target_x": OPP_TABLE_CENTER_X,
-    #         "target_y": 0.0,
-    #         "table_x_min": OPP_TABLE_X[0],
-    #         "table_x_max": OPP_TABLE_X[1],
-    #         "table_y_half": 0.7625,
-    #         "table_z": TABLE_Z,
-    #         "sigma_x": 0.25,
-    #         "sigma_y": 0.3,
-    #     },
+    #     func=mdp.post_hit_landing_prediction, weight=5.0,
+    #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "target_x": OPP_TABLE_CENTER_X,
+    #             "target_y": 0.0, "table_x_min": OPP_TABLE_X[0], "table_x_max": OPP_TABLE_X[1],
+    #             "table_y_half": 0.7625, "table_z": TABLE_Z, "sigma_x": 0.25, "sigma_y": 0.3},
     # )
     # post_hit_lob_penalty = RewTerm(
     #     func=mdp.post_hit_lob_penalty,
@@ -303,15 +324,15 @@ class RewardsCfg:
     # )
 
     # === Sim-to-real smoothing regularizers (kept at current weights) ===
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.03)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
     joint_acc = RewTerm(
         func=mdp.joint_acc_l2,
-        weight=-2.0e-5,
+        weight=-1.0e-6,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
     )
     joint_jerk = RewTerm(
         func=mdp.joint_jerk_l2,
-        weight=-5.0e-9,
+        weight=-2.0e-10,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
     )
     joint_limit = RewTerm(
@@ -321,7 +342,7 @@ class RewardsCfg:
     )
     joint_effort_margin = RewTerm(
         func=mdp.joint_effort_margin_penalty,
-        weight=-3.0,
+        weight=-0.5,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES), "margin_frac": 0.85},
     )
 
@@ -341,7 +362,13 @@ class EventCfg:
     reset_ball = EventTerm(
         func=mdp.launch_ball,
         mode="reset",
-        params={"ball_cfg": SceneEntityCfg("ball"), **SAC_FIXED_MIDDLE_BALL},
+        params=SAC_BALL_RESET_PARAMS,
+    )
+    ball_air_drag = EventTerm(
+        func=mdp.apply_air_drag,
+        mode="interval",
+        interval_range_s=(0.02, 0.02),
+        params={"ball_cfg": SceneEntityCfg("ball"), "k": SAC_BALL_DRAG_K},
     )
     track_episode = EventTerm(
         func=mdp.update_sac_episode_state,
@@ -385,6 +412,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         self.sim.physx.enable_ccd = True
+        self.scene.ball.spawn.rigid_props.linear_damping = SAC_BALL_LINEAR_DAMPING
         self.scene.robot.init_state.pos = (SAC_ROBOT_BASE_X, 0.0, 0.0)
         if ROBOT_SIDE < 0:
             self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)

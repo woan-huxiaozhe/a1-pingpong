@@ -20,9 +20,13 @@ class SACConfig:
     alpha_lr: float = 3.0e-4
     gamma: float = 0.98
     tau: float = 0.005
-    initial_alpha: float = 0.02
-    min_alpha: float = 0.02
+    # Exploration floor raised again for the sparse/event-heavy reward pass: with the dense
+    # approach-window proxies removed, the policy needs broader stochastic coverage to discover
+    # contact-frame swings before valid-return events are common.
+    initial_alpha: float = 0.10
+    min_alpha: float = 0.10
     target_entropy: float | None = None
+    aux_reconstruction_coef: float = 0.05
 
 
 def _activation(name: str) -> type[nn.Module]:
@@ -47,6 +51,17 @@ def mlp(input_dim: int, hidden_dims: Iterable[int], output_dim: int, activation:
     return nn.Sequential(*layers)
 
 
+def mlp_body(input_dim: int, hidden_dims: Iterable[int], activation: str) -> tuple[nn.Sequential, int]:
+    layers: list[nn.Module] = []
+    last = input_dim
+    act_cls = _activation(activation)
+    for hidden in hidden_dims:
+        layers.append(nn.Linear(last, hidden))
+        layers.append(act_cls())
+        last = hidden
+    return nn.Sequential(*layers), last
+
+
 def _grad_l2_norm(parameters: Iterable[torch.nn.Parameter]) -> torch.Tensor:
     total = None
     for param in parameters:
@@ -60,15 +75,31 @@ def _grad_l2_norm(parameters: Iterable[torch.nn.Parameter]) -> torch.Tensor:
 
 
 class TanhGaussianActor(nn.Module):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dims: tuple[int, ...], activation: str):
+    def __init__(
+        self,
+        obs_dim: int,
+        action_dim: int,
+        hidden_dims: tuple[int, ...],
+        activation: str,
+        aux_target_dim: int = 0,
+    ):
         super().__init__()
-        self.net = mlp(obs_dim, hidden_dims, action_dim * 2, activation)
+        self.trunk, trunk_dim = mlp_body(obs_dim, hidden_dims, activation)
+        self.action_head = nn.Linear(trunk_dim, action_dim * 2)
+        self.aux_head = nn.Linear(trunk_dim, aux_target_dim) if aux_target_dim > 0 else None
         self.action_dim = action_dim
+        self._legacy_final_index = 2 * len(hidden_dims)
 
     def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        mean, log_std = self.net(obs).chunk(2, dim=-1)
+        features = self.trunk(obs)
+        mean, log_std = self.action_head(features).chunk(2, dim=-1)
         log_std = log_std.clamp(-5.0, 2.0)
         return mean, log_std
+
+    def reconstruct_aux(self, obs: torch.Tensor) -> torch.Tensor | None:
+        if self.aux_head is None:
+            return None
+        return self.aux_head(self.trunk(obs))
 
     def sample(self, obs: torch.Tensor, deterministic: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         mean, log_std = self(obs)
@@ -83,6 +114,35 @@ class TanhGaussianActor(nn.Module):
         action = torch.tanh(z)
         log_prob = normal.log_prob(z) - torch.log(1.0 - action.pow(2) + 1.0e-6)
         return action, log_prob.sum(dim=-1, keepdim=True)
+
+    def load_compatible_state_dict(self, state_dict: dict[str, torch.Tensor]) -> bool:
+        """Load current actor weights, or convert the pre-auxiliary ``net.*`` layout.
+
+        Returns True for an exact current-layout load. Returns False when the legacy policy
+        trunk/action weights were converted and the auxiliary head stayed freshly initialized.
+        """
+        try:
+            self.load_state_dict(state_dict)
+            return True
+        except RuntimeError:
+            pass
+        if not any(key.startswith("net.") for key in state_dict):
+            self.load_state_dict(state_dict)
+            return True
+
+        converted: dict[str, torch.Tensor] = {}
+        final_prefix = f"net.{self._legacy_final_index}."
+        for key, value in state_dict.items():
+            if key.startswith(final_prefix):
+                converted["action_head." + key[len(final_prefix) :]] = value
+            elif key.startswith("net."):
+                converted["trunk." + key[len("net.") :]] = value
+        missing, unexpected = self.load_state_dict(converted, strict=False)
+        allowed_missing = {"aux_head.weight", "aux_head.bias"}
+        if unexpected or any(key not in allowed_missing for key in missing):
+            details = f"missing={missing}, unexpected={unexpected}"
+            raise RuntimeError(f"Could not convert legacy actor checkpoint: {details}")
+        return False
 
 
 class Critic(nn.Module):
@@ -115,7 +175,11 @@ class SACAgent:
         self._min_log_alpha = math.log(self.config.min_alpha) if self.config.min_alpha > 0.0 else None
 
         self.actor = TanhGaussianActor(
-            actor_obs_dim, action_dim, self.config.actor_hidden_dims, self.config.activation
+            actor_obs_dim,
+            action_dim,
+            self.config.actor_hidden_dims,
+            self.config.activation,
+            aux_target_dim=self._aux_target_dim(),
         ).to(self.device)
         self.critic1 = Critic(
             critic_obs_dim, action_dim, self.config.critic_hidden_dims, self.config.activation
@@ -181,7 +245,9 @@ class SACAgent:
         q1_pi = self.critic1(obs_critic, new_action)
         q2_pi = self.critic2(obs_critic, new_action)
         q_pi = torch.min(q1_pi, q2_pi)
-        actor_loss = (self.alpha.detach() * log_prob - q_pi).mean()
+        policy_loss = (self.alpha.detach() * log_prob - q_pi).mean()
+        aux_loss = self._aux_reconstruction_loss(obs_actor, obs_critic)
+        actor_loss = policy_loss + self.config.aux_reconstruction_coef * aux_loss
 
         actor_params = list(self.actor.parameters())
         self.actor_opt.zero_grad(set_to_none=True)
@@ -201,6 +267,8 @@ class SACAgent:
         return {
             "critic_loss": float(critic_loss.detach().cpu()),
             "actor_loss": float(actor_loss.detach().cpu()),
+            "policy_loss": float(policy_loss.detach().cpu()),
+            "aux_reconstruction_loss": float(aux_loss.detach().cpu()),
             "actor_grad_norm": float(actor_grad_norm.detach().cpu()),
             "critic_grad_norm": float(critic_grad_norm.detach().cpu()),
             "alpha_loss": float(alpha_loss.detach().cpu()),
@@ -214,6 +282,35 @@ class SACAgent:
             return
         with torch.no_grad():
             self.log_alpha.clamp_(min=self._min_log_alpha)
+
+    def _aux_target_dim(self) -> int:
+        if self.config.aux_reconstruction_coef <= 0.0:
+            return 0
+        return max(0, self.critic_obs_dim - self.actor_obs_dim)
+
+    def _aux_target_scale(self, target: torch.Tensor) -> torch.Tensor:
+        if target.shape[-1] == 32:
+            scale = target.new_tensor(
+                [8.0] * 7
+                + [15.0] * 3
+                + [10.0] * 3
+                + [20.0] * 3
+                + [15.0] * 3
+                + [1.0] * 9
+                + [3.0, 1.5, 1.5, 1.0]
+            )
+            return scale.unsqueeze(0)
+        return target.detach().std(dim=0, keepdim=True).clamp(min=1.0)
+
+    def _aux_reconstruction_loss(self, obs_actor: torch.Tensor, obs_critic: torch.Tensor) -> torch.Tensor:
+        if self.config.aux_reconstruction_coef <= 0.0 or self.critic_obs_dim <= self.actor_obs_dim:
+            return obs_actor.new_zeros(())
+        pred = self.actor.reconstruct_aux(obs_actor)
+        if pred is None:
+            return obs_actor.new_zeros(())
+        target = obs_critic[:, self.actor_obs_dim :].detach()
+        target = target / self._aux_target_scale(target)
+        return F.smooth_l1_loss(pred, target)
 
     def _soft_update(self, source: nn.Module, target: nn.Module):
         with torch.no_grad():
@@ -254,14 +351,15 @@ class SACAgent:
             config=config,
             device=device,
         )
-        agent.actor.load_state_dict(checkpoint["actor"])
+        actor_exact = agent.actor.load_compatible_state_dict(checkpoint["actor"])
         agent.critic1.load_state_dict(checkpoint["critic1"])
         agent.critic2.load_state_dict(checkpoint["critic2"])
         agent.target_critic1.load_state_dict(checkpoint["target_critic1"])
         agent.target_critic2.load_state_dict(checkpoint["target_critic2"])
         agent.log_alpha.data.copy_(checkpoint["log_alpha"].to(agent.device))
         agent._clamp_log_alpha()
-        agent.actor_opt.load_state_dict(checkpoint["actor_opt"])
+        if actor_exact:
+            agent.actor_opt.load_state_dict(checkpoint["actor_opt"])
         agent.critic_opt.load_state_dict(checkpoint["critic_opt"])
         agent.alpha_opt.load_state_dict(checkpoint["alpha_opt"])
         agent.checkpoint_step = int(checkpoint.get("step", 0))
@@ -291,7 +389,7 @@ class SACAgent:
             config=config,
             device=device,
         )
-        agent.actor.load_state_dict(checkpoint["actor"])
+        agent.actor.load_compatible_state_dict(checkpoint["actor"])
         agent.log_alpha.data.copy_(checkpoint["log_alpha"].to(agent.device))
         agent._clamp_log_alpha()
         agent.checkpoint_step = int(checkpoint.get("step", 0))

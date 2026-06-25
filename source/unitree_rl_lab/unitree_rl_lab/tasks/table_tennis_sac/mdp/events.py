@@ -8,7 +8,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
 from isaaclab.utils.math import quat_rotate
 
-from unitree_rl_lab.tasks.table_tennis.mdp.events import launch_ball
+from unitree_rl_lab.tasks.table_tennis.mdp.events import apply_air_drag, launch_ball
 from unitree_rl_lab.tasks.table_tennis_sac.event_tags import EVENT_TO_BIT
 from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import RACKET_OFFSET_Z
 
