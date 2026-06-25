@@ -1,0 +1,173 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/rewards.py
+  s_e7d449cad32d06::t_f5e6d9c4afe729 19
+  s_5476c62b64205c::t_f628a8ac54d71d 555-561,563-564,566-568,570-575,583-588
+  s_5476c62b64205c::t_94d0b7ffcde33e 256-264
+  s_5476c62b64205c::t_10a095fcfa1639 192-218,232-255,265-271
+  s_e7d449cad32d06::t_9aed4681a5ba4d 3
+  s_5476c62b64205c::t_0dbaa43ada9405 15-18,20
+  s_5476c62b64205c::t_e9404e4d7a0161 219-231
+  s_47156d452e2ad3::t_751262d61af8f7 552-553,562,565,569,576-577
+  s_e7d449cad32d06::t_21275a5df5413b 272-407
+docs/sac_table_tennis_architecture.md
+  s_7f92b26372e4a2::t_99e270cd749540 76-78
+  s_d593d0b1c6c1a4::t_fe4f83017c037c 418-424,428-431
+  s_7f92b26372e4a2::t_ce6f72022933ee 96-98
+  s_7f92b26372e4a2::t_21340851932b52 67,89-93,99,120
+  s_d593d0b1c6c1a4::t_66266ae49206ab 286-288,290
+  s_7f92b26372e4a2::t_a6192a72f96737 84-88
+  s_d593d0b1c6c1a4::t_87ee68ae03e3b4 68-70,72,79-82
+  s_7f92b26372e4a2::t_7ab8f7add47ff2 94-95,100,105-108
+  s_d593d0b1c6c1a4::t_dfc766a933ac51 554-556,610,612-614,616,624,626
+  s_d593d0b1c6c1a4::t_56914f0b96d182 23
+  s_d593d0b1c6c1a4::t_ea89d9e3eece81 640-641,643-644,646-647
+  s_7f92b26372e4a2::t_4a215404e54d4b 101-104,109-110
+  s_1fe99ad8e01fa3::t_6d612c45089a81 303
+  s_d593d0b1c6c1a4::t_ab781c9b96330a 440-442,466-470,475-484,500
+  s_1fe99ad8e01fa3::t_e792602adead9f 497-498,502,524,545,611,642
+  s_1fe99ad8e01fa3::t_f3dbcd6fe8a250 3,271,273,275,279-283,296,299-300,302,306-308
+docs/command_lines.md
+  s_1fe99ad8e01fa3::t_a619978d547c46 7,61
+  h_c9d7340f891f95 54
+scripts/sac_table_tennis/rollout_contact_state.py
+  s_e7d449cad32d06::t_3527b91833e578 1-184
+scripts/sac_table_tennis/train.py
+  s_1fe99ad8e01fa3::t_2955e04f0faa8b 19-27
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/hitting.py
+  s_5476c62b64205c::t_104fa098a9d54f 186
+  s_e7d449cad32d06::t_942f8d5e359298 217-285
+  s_5476c62b64205c::t_5c69db86f635b7 1-185,187-216
+tests/test_sac_agent_aux.py
+  s_d593d0b1c6c1a4::t_350b3540b4c485 1-35
+scripts/sac_table_tennis/scan_real_serve_drag.py
+  s_7f92b26372e4a2::t_be98a1570e0459 1-110,115-139,142-171
+  s_7f92b26372e4a2::t_994db636103ed0 111-114,140-141
+docs/sac_real_serve_state_pipeline.md
+  s_7f92b26372e4a2::t_94a3e268996cee 1-106,110-139,142,152-163,165-167,170-219,221-229,244-262,265-285,289-296,299-341
+  s_7f92b26372e4a2::t_16e86cf47c6ea7 107-109,140-141,143-151,164,168-169,220,230-243,263-264,286-288,297-298
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/create_serve_states.py
+  s_7f92b26372e4a2::t_9f9833a43f5f26 10,22,375
+  s_7f92b26372e4a2::t_0b3f4061dc8d0a 1-9,11-20,24-124,128-139,142-143,145-146,163-168,170-172,174-331,351-352,354-361,363,369-374,376-380,382-408,410-420,422-433,436-468,470-475
+  s_7f92b26372e4a2::t_270998ecef4090 362,381
+  s_7f92b26372e4a2::t_aedd473374128c 421,434-435
+  s_7f92b26372e4a2::t_cfd912abe88f9d 140-141,144,147-162,364-368
+  s_7f92b26372e4a2::t_c95c2c7b12a7b1 469
+  s_7f92b26372e4a2::t_524b1fb7966de8 21,23,125-127,169,173,332-350,353,409
+tests/test_ideal_racket_velocity.py
+  s_5476c62b64205c::t_4be778b03d7606 1-151
+  s_e7d449cad32d06::t_81bd0350c2e151 152-196
+docs/traditional_swing_analysis_plan.md
+  s_5476c62b64205c::t_3d9f7b0fc53561 1-132
+scripts/sac_table_tennis/analyze_contact_state.py
+  s_e7d449cad32d06::t_ff6abb5836f090 1-98
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/events.py
+  s_7f92b26372e4a2::t_1581273069cd26 11
+docs/sac_catch_lob_diagnosis_and_fix.md
+  s_c3600671401646::t_4d60f059fa6c67 1,3-7,9,15-19,23,25-28,30-32,34-39,43,45-46,52,55,57,61,63-66,68,70-75,77,79,81-83,87,89,91-93,97,99,101,103,149,153,158
+  s_1fe99ad8e01fa3::t_7af2475ba5ff1a 100,102
+  s_1fe99ad8e01fa3::t_303ce7f205b84e 107-147
+  s_e7d449cad32d06::t_5cc38807de4482 2,8,10-14,20-22,24,29,33,40-42,44,47-51,53-54,56,58-60,62,67,69,76,78,80,84-86,88,90,94-96,98,104-106,148,150-152,154-157
+scripts/sac_table_tennis/verify_new_rewards.py
+  s_e7d449cad32d06::t_a109dcd0e916a9 1-57
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/replay.py
+  s_d593d0b1c6c1a4::t_7cbf2f60973192 181-187
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/sac.py
+  s_d593d0b1c6c1a4::t_6e9d4533506379 29,54-62
+  s_d593d0b1c6c1a4::t_fadb6d5842b1ee 178-182
+  s_d593d0b1c6c1a4::t_974a9851df92e1 248-250,270-271
+  s_d593d0b1c6c1a4::t_a9bde4b92ec30d 286-314
+  s_d593d0b1c6c1a4::t_0cbeef6ef6d401 354,361-362,392
+  s_d593d0b1c6c1a4::t_9611e631665c07 78-85,87-89,91,94-95,99-103,118-145
+  s_1fe99ad8e01fa3::t_048f2b4f69d42b 23-27
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/env_cfg.py
+  s_d593d0b1c6c1a4::t_37c9e841fa32fc 63,65,345
+  s_7f92b26372e4a2::t_695229e182a0d5 80-81,367-371,415
+  s_1fe99ad8e01fa3::t_bff97b1ae3ab9b 233,235,245-248,251
+  s_7f92b26372e4a2::t_87c106119d7549 3-4,77-78,82-86,365
+  s_5476c62b64205c::t_4aee239bf20df3 227-232
+  h_c9d7340f891f95 61-62,68-76,79,327,330,335
+  s_1fe99ad8e01fa3::t_e21e2e434e8843 215,225-226,271,301-302
+  s_1fe99ad8e01fa3::t_a976274c1d658f 209-214,217-220,222-224
+  s_5476c62b64205c::t_057b5888399640 297-300,304,308-311
+  s_47156d452e2ad3::t_0bacfd0b166e9f 241-242
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/__init__.py
+  s_e7d449cad32d06::t_1b6cd3ea91db9c 10,12
+  s_5476c62b64205c::t_07da5b12b9c0e5 11
+scripts/sac_table_tennis/validate_real_serve_isaac.py
+  s_7f92b26372e4a2::t_c3841edae483b5 57,65-68,361-362
+  s_7f92b26372e4a2::t_e135f9889c752f 27
+  s_7f92b26372e4a2::t_0cd5acd155bc65 19,55-56,58-64,118,120,189-193,221,224-233,237,257-258,282-313,320,351,360
+  s_7f92b26372e4a2::t_ae00a3c23c2910 1-18,20-26,28-54,69-117,119,121-188,194,196,198-213,215-220,222-223,234-236,239-256,259-281,314-319,321-350,352-359,363-366
+  s_7f92b26372e4a2::t_3591fb56c1a336 195,197,214,238
+tests/test_sac_table_tennis_pipeline.py
+  s_1fe99ad8e01fa3::t_71c9c1104de99f 144,166
+  s_1fe99ad8e01fa3::t_e95e09fdd615b0 1,10,46,50-52,128,130-134,138-139,153-155,158,164-165,173-174,176-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "d35ecfd0bdd3b779f3e35ee1f0195e79d946dd76",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_1fe99ad8e01fa3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019efce1-024f-7d01-9750-de26761ded7e",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_47156d452e2ad3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36133ba5-8a8c-412e-bddf-b49752bd7d45",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_5476c62b64205c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b231b624-2abd-4163-8173-4ec1770dffd3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_7f92b26372e4a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eed1d-1b53-7423-a30c-e7755140a51b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_c3600671401646": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d32b7b95-6592-4ac5-b3b4-245d497222c5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_d593d0b1c6c1a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef253-08fd-7120-9097-7b3e3dfd8861",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_e7d449cad32d06": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "097b6eb6-7451-44b8-a33f-0873ac332484",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
