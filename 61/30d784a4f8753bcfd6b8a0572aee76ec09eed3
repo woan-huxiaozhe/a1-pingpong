@@ -1,0 +1,41 @@
+tests/test_hittrack_env_cfg.py
+  s_fe7f17dacb9a61::t_6421a8aa8a5f01 1-18,21,30-32
+  s_fe7f17dacb9a61::t_117e01de304925 19-20,22-29
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/hittrack_env_cfg.py
+  s_fe7f17dacb9a61::t_6deedf0bd4c893 1-16,19-69,76-233,238-245
+  s_fe7f17dacb9a61::t_a2127c03011137 17-18
+  s_fe7f17dacb9a61::t_bac1670ea38ece 70-75
+  s_fe7f17dacb9a61::t_2c630f458d592f 234-237
+tests/test_hittrack_baking.py
+  s_fe7f17dacb9a61::t_87c9434b637f88 1-50
+tests/_hittrack_loader.py
+  s_fe7f17dacb9a61::t_84fec41af6f443 47
+  s_fe7f17dacb9a61::t_b99d0f83c15441 44-46,48-51
+tests/test_hittrack_baked_source.py
+  s_fe7f17dacb9a61::t_8ecb393ada6c33 1-43
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/__init__.py
+  s_fe7f17dacb9a61::t_08b04f600344b0 12-21
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/reference_commands.py
+  s_fe7f17dacb9a61::t_72da50455cb90d 16
+  s_fe7f17dacb9a61::t_f44fddd6724fd8 58-71,85-86,95-99,101-135,139,151
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/bake_hittrack_references.py
+  s_fe7f17dacb9a61::t_5762f4cd714a26 1-228
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/__init__.py
+  s_fe7f17dacb9a61::t_03242cb41883af 19-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "6130d784a4f8753bcfd6b8a0572aee76ec09eed3",
+  "prompts": {},
+  "sessions": {
+    "s_fe7f17dacb9a61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f06e0d50-9702-4b36-b205-aafee556c393",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
