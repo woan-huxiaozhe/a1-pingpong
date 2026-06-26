@@ -1,0 +1,50 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/rewards.py
+  s_f892e49bf89496::t_8e2b724e410b94 688,693,698-700,706-708,718-720
+tests/test_sac_table_tennis_pipeline.py
+  s_f892e49bf89496::t_2f1c85b8cbedb8 10
+  s_f892e49bf89496::t_8d0e978f02ba54 71-76,138-139,148,157,180,186,190-194
+  s_f892e49bf89496::t_fd1ad015af5d50 134
+  s_f892e49bf89496::t_d1c7b797a791a7 195-196
+docs/sac_table_tennis_architecture.md
+  s_f892e49bf89496::t_5cd3a41ae536c4 619
+  s_f892e49bf89496::t_ad1a7bf7434256 339,624,626
+  s_f892e49bf89496::t_9be3d4d36e8d44 627
+  s_f892e49bf89496::t_d158433e026c19 309,340
+  s_f892e49bf89496::t_855c8419429aaf 274,278,284-285,290-291
+  s_f892e49bf89496::t_776374de584db1 276,293,295-296
+docs/sac_catch_joint_log_findings_2026-06-25.md
+  s_de3ec4f63d99db::t_a272058496a167 1-98,100-152
+  s_de3ec4f63d99db::t_2db64553678a2a 99
+scripts/sac_table_tennis/plot_sim_joint_log.py
+  s_de3ec4f63d99db::t_2ce5c91ff9414d 213,215
+  s_de3ec4f63d99db::t_d6eb25e64414a3 42-48
+  s_de3ec4f63d99db::t_9db4e1e4514983 118,121-154
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/env_cfg.py
+  s_f892e49bf89496::t_3c7d7e4e0a0849 305-306
+  s_f892e49bf89496::t_efcc360fd9cb1b 235,237,250,309-310
+  s_f892e49bf89496::t_04c2ecc04400ac 247-249,294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "1ded5c6d39a18e42552531069ad560255a94dea9",
+  "prompts": {},
+  "sessions": {
+    "s_de3ec4f63d99db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95317fb1-0e44-431b-a453-ee5143b572f0",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_f892e49bf89496": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019efe30-26f5-7c70-9cd3-f857034e3588",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
