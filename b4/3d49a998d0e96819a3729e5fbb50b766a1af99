@@ -1,0 +1,32 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/tracking.py
+  s_fe7f17dacb9a61::t_564a2561f5808f 1-37
+tests/_hittrack_loader.py
+  s_fe7f17dacb9a61::t_3b60fcb58b99fe 1-53
+tests/test_hittrack_reference_planner.py
+  s_fe7f17dacb9a61::t_da216fe4e55246 1-38
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/reference_source.py
+  s_fe7f17dacb9a61::t_c973a34817c17d 1-44
+tests/test_hittrack_tracking.py
+  s_fe7f17dacb9a61::t_4b66ce051bc0bd 1-6,13-45
+  s_fe7f17dacb9a61::t_a6af8b351bdd64 7-12
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/reference_planner.py
+  s_fe7f17dacb9a61::t_02659b5dc8b7cf 1-39
+tests/test_hittrack_reference_source.py
+  s_fe7f17dacb9a61::t_9c6ad42e34aa95 1-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b43d49a998d0e96819a3729e5fbb50b766a1af99",
+  "prompts": {},
+  "sessions": {
+    "s_fe7f17dacb9a61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f06e0d50-9702-4b36-b205-aafee556c393",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
