@@ -7,7 +7,7 @@ tensors and ``_sac_step_event_mask``), mirroring the source one-to-one. They gua
 properties the refactor depends on:
 
   (a) each terminal reward fires only under its own event bit;
-  (b) the active outcome ladder is monotone: miss/no reward < hit < cross-net < valid return;
+  (b) the active outcome ladder keeps bad-hit terminal outcomes below cross-net/valid return;
   (c) ``racket_spin_penalty`` rises with contact angular velocity;
   (d) the ungated ``landing_placement`` scores an edge landing and a center landing equally
       (i.e. removing the center gate makes placement depend only on landing position).
@@ -68,6 +68,12 @@ def flat_return(env, ref_height=1.4, band=0.4):
     return torch.where(fired, score, torch.zeros_like(score))
 
 
+def net_clearance_score(clearance, ramp_low=-0.3, ramp_high=0.1):
+    positive = (clearance / max(ramp_high, 1.0e-6)).clamp(min=0.0, max=1.0)
+    negative = -(clearance / min(ramp_low, -1.0e-6)).clamp(min=0.0, max=1.0)
+    return torch.where(clearance >= 0.0, positive, negative)
+
+
 def landing_placement(env, target_x, target_y=0.0, sigma_x=0.25, sigma_y=0.3):
     fired = _fired(env, "valid_return")
     dx = env._sac_landing_x - target_x
@@ -125,11 +131,12 @@ def test_each_reward_fires_only_under_its_event_bit():
     assert torch.all(fr[[0, 1, 2]] == 0.0)
 
 
-def test_ladder_is_monotone_miss_lt_hit_lt_cross_net_lt_return_tier():
+def test_ladder_keeps_bad_hit_below_cross_net_and_return_tier():
     weights = {
         "hit_bonus": 20.0,
         "return_cross_net": 40.0,
-        "table_proximity": 5.0,
+        "table_proximity": 10.0,
+        "bad_hit": -50.0,
         "racket_spin_penalty": -2.0,
         "return_bonus": 100.0,
         "landing_placement": 25.0,
@@ -138,7 +145,7 @@ def test_ladder_is_monotone_miss_lt_hit_lt_cross_net_lt_return_tier():
     # Miss has no active positive reward in the sparse/event-heavy pass.
     miss_total = 0.0
 
-    # Best-case hit tier (bad_hit): hit_bonus const + perfect table_proximity, zero spin penalty.
+    # Best-case terminal bad-hit still must not out-earn crossing the net.
     env = _make_env(1)
     env._sac_step_event_mask[0] = EVENT_TO_BIT["hit"] | EVENT_TO_BIT["bad_hit"]
     env._sac_table_cross_x[0] = 1.0
@@ -147,6 +154,7 @@ def test_ladder_is_monotone_miss_lt_hit_lt_cross_net_lt_return_tier():
     hit_total = (
         weights["hit_bonus"] * 1.0
         + weights["table_proximity"] * float(table_proximity(env)[0])
+        + weights["bad_hit"] * 1.0
         + weights["racket_spin_penalty"] * float(racket_spin_penalty(env)[0])
     )
 
@@ -169,13 +177,21 @@ def test_ladder_is_monotone_miss_lt_hit_lt_cross_net_lt_return_tier():
         + weights["racket_spin_penalty"] * float(racket_spin_penalty(env)[0])
     )
 
-    assert miss_total < hit_total, (miss_total, hit_total)
+    assert hit_total <= miss_total, (hit_total, miss_total)
     assert hit_total < cross_total, (hit_total, cross_total)
     assert cross_total < return_total, (cross_total, return_total)
     # Effective-value (post step_dt) ladder caps from the plan also hold.
     assert math.isclose(weights["hit_bonus"] * 0.02, 0.40)
     assert math.isclose(weights["return_cross_net"] * 0.02, 0.80)
+    assert math.isclose(weights["bad_hit"] * 0.02, -1.00)
     assert math.isclose(weights["return_bonus"] * 0.02, 2.00)
+
+
+def test_net_clearance_score_is_negative_below_net_and_positive_above():
+    clearance = torch.tensor([-0.6, -0.15, 0.0, 0.05, 0.2])
+    out = net_clearance_score(clearance, ramp_low=-0.3, ramp_high=0.1)
+    expected = torch.tensor([-1.0, -0.5, 0.0, 0.5, 1.0])
+    assert torch.allclose(out, expected)
 
 
 def test_racket_spin_penalty_rises_with_angular_velocity():

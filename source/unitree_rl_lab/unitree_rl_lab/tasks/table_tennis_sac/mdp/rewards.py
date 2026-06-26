@@ -685,28 +685,27 @@ def post_hit_net_clearance(
     robot_side: int,
     net_x: float = 0.0,
     net_z: float = 0.9125,
-    ramp_low: float = -0.6,
+    ramp_low: float = -0.3,
     ramp_high: float = 0.1,
     drag_k: float = 0.08,
     lin_damp: float = 0.05,
 ) -> torch.Tensor:
-    """Dense bridge toward an actual return: reward the *drag-correct* predicted ball height
-    at the net plane.
+    """Dense bridge toward an actual return: score drag-correct predicted net clearance.
 
     The sparse return/valid_return events only fire once the ball is already above the net at
     ``x = net_x``; before the policy can produce such a hit they give zero gradient, so training
     settles into a steep lob that farms the height-blind ``post_hit_outgoing`` /
-    ``post_hit_net_progress`` terms and then times out as a bad hit. This term closes that gap by
-    rewarding the predicted net-crossing height -- higher as the hit gets flatter / faster /
-    struck from a higher contact point, i.e. toward a real return.
+    ``post_hit_net_progress`` terms and then times out as a bad hit. This term closes that gap
+    by making predicted net clearance signed: below-net predictions are negative, and only
+    above-net predictions are positive.
 
     The prediction uses ``hitting.predict_z_at_x``, which integrates the SAME discrete dynamics
     the sim applies (per-substep gravity + linear damping + one quadratic air-drag patch per
     control step). The earlier gravity-only solve assumed a drag-free scene; with the scene's
     quadratic drag (k=0.08) + linear damping (0.05) it systematically OVER-predicted the net
-    height and paid partial credit to high lobs, cementing the touch-lob local optimum -- the
-    drag-aware solve is the fix. ``ramp_low`` starts the slope below the lob's clearance so there
-    is gradient at the operating point; the score saturates at ``ramp_high`` (~10 cm above net).
+    height and paid partial credit to high lobs, cementing the touch-lob local optimum. The
+    signed score is `-1` at or below ``ramp_low`` (default 30 cm below net), `0` at the net, and
+    `+1` at or above ``ramp_high`` (default 10 cm above net).
     Active only while the ball is still on the robot's side and travelling toward the net."""
     _ensure_tracker(env)
     ball: RigidObject = env.scene[ball_name]
@@ -716,7 +715,9 @@ def post_hit_net_clearance(
         pos, vel, net_x=net_x, drag_k=drag_k, lin_damp=lin_damp, control_dt=env.step_dt,
     )
     clearance = z_at_net - net_z
-    score = ((clearance - ramp_low) / max(ramp_high - ramp_low, 1.0e-6)).clamp(min=0.0, max=1.0)
+    positive = (clearance / max(ramp_high, 1.0e-6)).clamp(min=0.0, max=1.0)
+    negative = -(clearance / min(ramp_low, -1.0e-6)).clamp(min=0.0, max=1.0)
+    score = torch.where(clearance >= 0.0, positive, negative)
     ball_x = pos[:, 0]
     outgoing_speed = -float(robot_side) * vel[:, 0]
     before_net = (ball_x - net_x) * float(robot_side) > 0.0

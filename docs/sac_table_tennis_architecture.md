@@ -271,26 +271,29 @@ Joint targets are clamped by the action term. Joint-limit termination is current
 
 ## 5. Reward
 
-IsaacLab reward terms are configured in `RewardsCfg`. As of the 2026-06-25 lob-plateau pass, the default reward is a **sparse/event-heavy ladder** plus small terminal shaping on actual outcomes and fixed sim-to-real regularizers. The three pre-contact approach-window dense proxies (`racket_ideal_velocity_match`, `racket_ideal_normal_match`, `racket_predicted_landing`) are unwired by default because they optimized an ideal-looking non-contact pose rather than the contact frame that determines return quality. The IsaacLab `RewardManager` multiplies each weight by `step_dt = 0.02`, so the "effective" per-event value is `weight * 0.02`; equivalently `weight = effective / 0.02`.
+IsaacLab reward terms are configured in `RewardsCfg`. As of the 2026-06-25 bad-hit pressure pass, the default reward is a **sparse/event-heavy ladder** plus bounded post-hit bridge shaping and fixed sim-to-real regularizers. The three pre-contact approach-window dense proxies (`racket_ideal_velocity_match`, `racket_ideal_normal_match`, `racket_predicted_landing`) are unwired by default because they optimized an ideal-looking non-contact pose rather than the contact frame that determines return quality. The IsaacLab `RewardManager` multiplies each weight by `step_dt = 0.02`, so the "effective" per-event value is `weight * 0.02`; equivalently `weight = effective / 0.02`.
 
-Design intent: use random warmup, entropy, and event replay for exploration; use high-weight events to decide credit. The reward should no longer pay the policy every approach-window step for proxy kinematics. A better outcome must dominate a worse one: hit < cross-net return < valid return. `miss_approach` is disabled because it paid positive reward for near-missing, a mutually-exclusive non-goal.
+Design intent: use random warmup, entropy, and event replay for exploration; use high-weight events to decide credit. The reward should no longer pay the policy every approach-window step for proxy kinematics. A better outcome must dominate a worse one: hit without return < cross-net return < valid return. `miss_approach` is disabled because it paid positive reward for near-missing, a mutually-exclusive non-goal.
 
-The event ladder is anchored by `hit_bonus` (+0.40), `return_cross_net` (+0.80), and `return_bonus` for `valid_return` (+2.00). Placement/flatness bonuses only fire after a real `valid_return`.
+The event ladder is anchored by `hit_bonus` (+0.40), a constant `bad_hit` cost (-1.00), `return_cross_net` (+0.80), and `return_bonus` for `valid_return` (+2.00). `post_hit_outgoing` and signed `post_hit_net_clearance` are low-weight bridge rewards; placement/flatness bonuses only fire after a real `valid_return`.
 
 | Tier | Event | Term | Func | Weight | Effective | Meaning |
 | --- | --- | --- | --- | ---: | ---: | --- |
 | 1 hit | `hit` | `hit_bonus` | `sac_event_reward(event="hit")` | `20.0` | `+0.40` | Ladder constant for making contact. |
 | 1 return bridge | `return` | `return_cross_net` | `sac_event_reward(event="return")` | `40.0` | `+0.80` | Event bridge for a hit ball crossing the net before final landing. |
-| 1 bad hit bridge | `bad_hit` | `table_proximity` | `sac_table_proximity` | `5.0` | `-0.10 -> +0.10` | Signed terminal progress at the first post-hit table-height crossing. Own-side/short landings are negative; crossing toward the opponent side is positive. |
+| 1 bad hit bridge | `bad_hit` | `table_proximity` | `sac_table_proximity` | `10.0` | `-0.20 -> +0.20` | Signed terminal progress at the first post-hit table-height crossing. Own-side/short landings are negative; crossing toward the opponent side is positive. |
+| 1 bad hit cost | `bad_hit` | `bad_hit` | `sac_bad_hit_penalty` | `-50.0` | `-1.00` | Constant cost for hit-but-failed outcomes, added after the 2026-06-25 joint-log diagnosis showed stable soft bad hits. |
 | 1/2 | `hit` | `racket_spin_penalty` (R_omega) | `sac_racket_spin_penalty` | `-2.0` | `0 -> -0.04` | Small hit-time angular-velocity penalty. Kept weaker during sparse exploration so it does not suppress useful exploratory swings. |
 | 2 valid return | `valid_return` | `return_bonus` | `sac_event_reward(event="valid_return")` | `100.0` | `+2.00` | Top ladder constant, far above the hit and cross-net bridge. |
 | 2 | `valid_return` | `landing_placement` | `sac_landing_placement` | `25.0` | `0 -> +0.50` | Gaussian on actual landing vs opponent-half center (`sigma_x = 0.25`, `sigma_y = 0.30`). **No center gate** (`center_sigma`/`center_gate_floor` left at default `0`). |
 | 2 | `valid_return` | `flat_return` | `sac_flat_return` | `10.0` | `0 -> +0.20` | `clamp((ref_height - post_hit_max_height) / band, 0, 1)` (`ref_height = 1.4 m`, `band = 0.4 m`): a flat drive scores high, a lob scores 0. Positive-terminal replacement for the disabled `post_hit_lob_penalty`. |
+| bridge | post-hit active | `post_hit_outgoing` | `post_hit_outgoing_velocity` | `1.0` | `0 -> +0.02/step` | Low-weight bridge for horizontal outgoing speed toward the opponent, scaled by `target_speed = 3.5 m/s`. |
+| bridge | post-hit active | `post_hit_net_clearance` | `post_hit_net_clearance` | `1.0` | `-0.02 -> +0.02/step` | Signed drag-aware predicted net-clearance bridge: `-1` at 30 cm below net, `0` at the net, `+1` at 10 cm above net. |
 | reg | every step | `action_rate` | `action_rate_l2` | `-0.005` | regularizer | Penalizes action changes. |
-| reg | every step | `joint_acc` | `joint_acc_l2` | `-1e-6` | regularizer | Penalizes joint acceleration. |
+| reg | every step | `joint_acc` | `joint_acc_l2` | `-5e-7` | regularizer | Penalizes joint acceleration. |
 | reg | every step | `joint_jerk` | `joint_jerk_l2` | `-2e-10` | regularizer | Penalizes joint jerk (single-step acceleration reversals). |
-| reg | every step | `joint_limit` | `joint_limit_margin_penalty` | `-3.0` | barrier | Penalizes joints inside a `0.20 rad` margin before the hard limits. |
-| reg | every step | `joint_effort_margin` | `joint_effort_margin_penalty` | `-0.5` | barrier | Penalizes torques approaching `85%` of each joint's effort limit. Reduced from `-3.0` for the fixed-box recovery curriculum so effort pressure does not suppress the swing before sparse return rewards become common. |
+| reg | every step | `joint_limit` | `joint_limit_margin_penalty` | `-1.0` | barrier | Penalizes joints inside a `0.05 rad` margin before the hard limits. |
+| reg | every step | `joint_effort_margin` | `joint_effort_margin_penalty` | `-0.25` | barrier | Penalizes torques approaching `85%` of each joint's effort limit. Kept low for the fixed-box recovery curriculum so effort pressure does not suppress the swing before sparse return rewards become common. |
 
 Unwired terms (function bodies kept in `rewards.py` as ablation hooks; only the `RewardsCfg` wiring is commented out, per repo convention) and why:
 
@@ -303,9 +306,7 @@ Unwired terms (function bodies kept in `rewards.py` as ablation hooks; only the 
 | `valid_return` (old wiring) | `25.0` | Re-wired as `return_bonus` at the higher top-of-ladder constant (`100.0`). |
 | `landing_placement` (center-gated) | `25.0` | Re-wired identically but with the multiplicative center gate removed. |
 | `miss` (penalty) | `-5.0` | Disabled; negative outcome penalties invite early-termination exploits (repo history saw a joint-limit termination exploit). |
-| `bad_hit` (penalty) | `-3.0` | Replaced by the signed `table_proximity` bridge; the ladder is driven mainly by event constants, not penalties. |
-| `post_hit_net_clearance` | `1.0` | Per-step dense predictor that dominated `reward/total_mean` with noise; replaced by the terminal `table_proximity`. |
-| `post_hit_landing_prediction` | `5.0` | Same: per-step dense predictor replaced by terminal `table_proximity`. |
+| `post_hit_landing_prediction` | `5.0` | Gravity-only landing predictor left unwired because the scene uses drag/damping; use `post_hit_net_clearance` plus real return events instead. |
 | `racket_ideal_velocity_match` | `10.0` | Approach-window dense proxy; v1/v2 showed it can be optimized without producing a committed contact-frame return. |
 | `racket_ideal_normal_match` | `8.0` | Approach-window dense proxy; v2 reached very high proxy scores while `valid_return` stayed near zero. |
 | `racket_predicted_landing` | `12.0` | Approach-window "if hit now" predictor; the scored instant can differ from the actual contact instant. |
@@ -334,6 +335,8 @@ The historical retune notes below are retained for context; they describe the pr
 2026-06-16 pre-hit shaping cleanup. The four dense pre-hit shaping terms (`racket_ball_proximity`, `racket_approach`, `racket_face_target`, `racket_normal_swing`) were set to `0.0` by default. In the 180k→260k resume tail they were strongly negatively correlated with `episode/valid_return_rate` and `episode/hit_rate`, strongly positively correlated with `episode/miss_rate`, and positively correlated with worse `episode/hit_center_offset_mean`. This suggests they had become stale scaffolding after the policy learned contact. They remain in the config only for ablation or early-curriculum experiments.
 
 2026-06-18 center-contact re-gate. Edge/blade contact persisted under the additive-only `hit_centered` term, and the earlier `quality_hit`-only multiplicative gate had already plateaued at `hit_center_offset_mean ≈ 7.6 cm` (see the 2026-06-16 notes). Root cause: the dominant success rewards — `valid_return` (25), `landing_placement` (25), `return_cross_net` (15) — were entirely center-blind, so an edge hit that happened to land in-court collected the same ~65 points as a center hit; gating only `quality_hit` (20) put too little reward mass behind center contact to move the policy. Fix: a shared per-hit centering gate `floor + (1 - floor) * exp(-center_sigma * offset^2)` (`_center_gate_factor` in `rewards.py`, reading the cached `_sac_hit_center_offset`, which persists from the hit step through the `valid_return` step) now multiplies **both** `quality_hit` and `landing_placement` (`center_sigma = 400`, `center_gate_floor = 0.15`). `valid_return` and `return_cross_net` are deliberately left ungated as the unconditional "ball was returned" anchor, so the converged policy cannot forget returning while it learns to center. Sigma is calibrated to the real blade radius (~7.5 cm, 15 cm diameter): `center_sigma = 400` gives a 1/e width of ~5 cm and suppresses a rim hit to factor ~0.24, whereas the inherited `sigma = 220` (1/e width ~6.7 cm, nearly the whole blade) left a rim hit at ~0.43 — nearly flat across the blade, the likely reason both the additive `hit_centered` and the earlier `quality_hit`-only gate failed to pull contact inward. The same `center_sigma = 400` was applied to the additive `hit_centered` term for consistency, and all three terms share `SAC_CENTER_SIGMA` / `SAC_CENTER_GATE_FLOOR` in `env_cfg.py`. Net effect per success: centering from the rim (~7.6 cm) to center raises the gated reward mass (`quality_hit` + `landing_placement`, max 45) from ~11 to ~45, against an ungated return anchor of ~42. The `0.15` floor keeps the gate a gradient rather than a cliff, which the converged-but-oscillating policy is sensitive to (see `docs/sac_catch_oscillation_diagnosis.md`). If `hit_center_offset_mean` still does not fall, the next lever is to extend the gate to `return_cross_net`/`valid_return`, raise `center_sigma` further, or lower the floor; if it falls but `valid_return_rate` drops, raise `center_gate_floor` (or check whether center contact is even kinematically reachable for the fixed serve).
+
+2026-06-25 bad-hit pressure follow-up. The `2026-06-25_15-29-21` best policy hit reliably but still mapped most contacts to `bad_hit` (`eval/hit_rate ~= 0.798`, `eval/valid_return_rate ~= 0.021`), and the joint log showed no sustained velocity or effort saturation. A first pass added `bad_hit = -25` and raised both post-hit bridge terms to `3.0`; the follow-up `2026-06-25_18-07-13` run showed those dense bridge terms still outweighed the failure cost. The default now uses a stronger constant bad-hit cost (`weight = -50`, effective `-1.00`), raises `table_proximity` to `10.0`, returns `post_hit_outgoing` to a low bridge weight (`1.0`), and makes `post_hit_net_clearance` signed so below-net predictions are negative instead of weakly positive.
 
 ## 6. Event Logic
 
@@ -613,14 +616,15 @@ These are weighted reward terms from IsaacLab's `RewardManager`, averaged over e
 - `reward_terms/hit_bonus`: sparse contact ladder constant.
 - `reward_terms/return_cross_net`: sparse crossed-net event bridge.
 - `reward_terms/table_proximity`: bad-hit terminal distance-to-opponent-table bootstrap.
+- `reward_terms/bad_hit`: constant bad-hit event cost.
 - `reward_terms/racket_spin_penalty`: hit-time racket angular-velocity penalty.
 - `reward_terms/return_bonus`: sparse valid-return ladder constant.
 - `reward_terms/landing_placement`: valid-return placement score at the actual landing point.
 - `reward_terms/flat_return`: valid-return low-arc bonus.
-- `reward_terms/post_hit_outgoing`: disabled outgoing-velocity ablation hook.
+- `reward_terms/post_hit_outgoing`: low-weight post-hit outgoing-velocity bridge.
 - `reward_terms/post_hit_net_progress`: disabled post-hit net-progress hook.
-- `reward_terms/post_hit_net_clearance`: predicted net-clearance shaping.
-- `reward_terms/post_hit_landing_prediction`: predicted opponent-table center placement shaping.
+- `reward_terms/post_hit_net_clearance`: signed drag-aware predicted net-clearance bridge.
+- `reward_terms/post_hit_landing_prediction`: disabled opponent-table landing-prediction hook.
 - `reward_terms/post_hit_lob_penalty`: disabled high-arc penalty ablation hook.
 - `reward_terms/action_rate`: action-change penalty.
 - `reward_terms/joint_acc`: joint-acceleration penalty.

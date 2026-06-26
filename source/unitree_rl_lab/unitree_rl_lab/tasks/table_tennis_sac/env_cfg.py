@@ -232,9 +232,9 @@ class RewardsCfg:
     #     params={"min_outgoing_speed": 1.0, "good_outgoing_speed": 3.0,
     #             "min_up_speed": -0.2, "up_tolerance": 0.4},
     # )
-    table_proximity = RewTerm(  # signed bad-hit bridge, effective [-0.10, +0.10]
+    table_proximity = RewTerm(  # signed bad-hit bridge, effective [-0.20, +0.20]
         func=mdp.sac_table_proximity,
-        weight=5.0,
+        weight=10.0,
         params={
             "target_x": OPP_TABLE_CENTER_X,
             "table_x_min": OPP_TABLE_X[0],
@@ -244,6 +244,10 @@ class RewardsCfg:
             "floor": -1.0,
         },
     )
+    # Constant bad-hit cost: after the 2026-06-25 joint-log diagnosis, the policy was reliably
+    # collecting hit reward while settling into short/soft bad hits. This cancels the contact
+    # bonus unless the post-hit bridge terms produce real forward/net-clearance progress.
+    bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-50.0)  # -1.00
     # R_omega clean-contact penalty is kept small while the sparse/event-heavy run is still
     # searching for a committed swing; too much early wrist-spin pressure can suppress useful
     # exploration before valid returns are common.
@@ -285,11 +289,9 @@ class RewardsCfg:
     #     },
     # )
     # miss = RewTerm(func=mdp.sac_miss_penalty, weight=-5.0)
-    # bad_hit = RewTerm(func=mdp.sac_bad_hit_penalty, weight=-3.0)
     # Dense bridge hit->return (re-enabled): rewards outgoing x-speed toward the opponent on
     # hit & ~valid_return & ~bad_hit, [0,1] scaled by target_speed. Height-blind (x only), so it
-    # must be paired with a height/flatness term to avoid farming lobs. Starting weight 1.0 --
-    # this is the main knob: raise it if returns still fail to emerge against joint_limit.
+    # must be paired with a height/flatness term to avoid farming lobs.
     post_hit_outgoing = RewTerm(
         func=mdp.post_hit_outgoing_velocity,
         weight=1.0,
@@ -300,17 +302,12 @@ class RewardsCfg:
     #     weight=0.0,
     #     params={"ball_name": "ball", "robot_side": ROBOT_SIDE, "robot_x": SAC_ROBOT_X},
     # )
-    # post_hit_net_clearance / post_hit_landing_prediction DISABLED (feat/sony-ace ideal-
-    # velocity refactor): both use a GRAVITY-ONLY projectile solve, but the scene now has
-    # quadratic air drag (k=0.08) + linear_damping (0.05), so their landing prediction is
-    # systematically optimistic -- they paid partial credit to a high lob that never reaches
-    # the opponent table, cementing the touch-lob local optimum. The active sparse/event run
-    # relies on return_cross_net, valid_return, landing_placement, and flat_return instead.
+    # post_hit_landing_prediction remains disabled because its gravity-only landing solve is
+    # systematically optimistic in the current drag/damping scene.
     # Height-aware partner to post_hit_outgoing (re-enabled with a drag-correct predictor):
     # rewards the predicted ball height at the net plane via mdp.predict_z_at_x, which mirrors
-    # the sim's quadratic-drag (k=0.08) + linear-damping (0.05) dynamics -- so it no longer
-    # over-credits high lobs the way the old gravity-only solve did. This is the term that gives
-    # the policy a "flatter/faster = better" gradient and discourages the touch-lob optimum.
+    # the sim's quadratic-drag (k=0.08) + linear-damping (0.05) dynamics. It is signed: below-net
+    # predictions are negative, and only above-net predictions are positive.
     post_hit_net_clearance = RewTerm(
         func=mdp.post_hit_net_clearance,
         weight=1.0,

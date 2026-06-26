@@ -39,6 +39,13 @@ def parse_args() -> argparse.Namespace:
         default=8000,
         help="Downsample long logs to at most this many points per line. Use 0 to disable.",
     )
+    parser.add_argument(
+        "--keep_reset_rows",
+        action="store_true",
+        help="Keep per-episode reset rows (done==1) and connect lines across episode "
+        "boundaries. By default those rows are dropped and the line is broken between "
+        "episodes, so the snap-back to the ready pose is not drawn as a fake spike.",
+    )
     return parser.parse_args()
 
 
@@ -108,19 +115,43 @@ def main() -> None:
 
     if args.x_axis == "time":
         x_label = "time [s]"
-        x_values = column_values(rows, "time_s")
+        x_column = "time_s"
     else:
         x_label = args.x_axis
-        x_values = column_values(rows, args.x_axis)
+        x_column = args.x_axis
 
-    indices = thin_indices(len(rows), args.max_points)
-    x_values = [x_values[index] for index in indices]
-    series: dict[str, list[float]] = {}
-    for joint in joints:
-        for prefix in ("q_target", "q_sim", "qd_sim", "tau_sim"):
-            column = f"{prefix}_{joint}"
-            values = column_values(rows, column)
-            series[column] = [values[index] for index in indices]
+    # Drop per-episode reset rows and break lines at episode boundaries so the
+    # snap-back to the ready pose between episodes is not drawn as a spike. Each
+    # episode's terminal row (done==1) logs the post-reset ready pose; without this
+    # the plotted line connects one episode's last swing sample to the next
+    # episode's reset state -- a fake 10-40 rad/s position/velocity jump.
+    episode_ids = [int(row["episode"]) for row in rows]
+    keep = list(range(len(rows)))
+    if "done" in header and not args.keep_reset_rows:
+        done_values = column_values(rows, "done")
+        keep = [index for index in keep if done_values[index] < 0.5]
+
+    columns = [f"{prefix}_{joint}" for joint in joints for prefix in ("q_target", "q_sim", "qd_sim", "tau_sim")]
+    raw_x = column_values(rows, x_column)
+    raw_series = {column: column_values(rows, column) for column in columns}
+
+    thinned = [keep[i] for i in thin_indices(len(keep), args.max_points)]
+
+    nan = float("nan")
+    x_values: list[float] = []
+    series: dict[str, list[float]] = {column: [] for column in columns}
+    previous_episode: int | None = None
+    for index in thinned:
+        episode_id = episode_ids[index]
+        if previous_episode is not None and episode_id != previous_episode:
+            # break the line (and skip a connecting segment) between episodes
+            x_values.append(nan)
+            for column in columns:
+                series[column].append(nan)
+        x_values.append(raw_x[index])
+        for column in columns:
+            series[column].append(raw_series[column][index])
+        previous_episode = episode_id
 
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
     if not args.show:
@@ -179,8 +210,9 @@ def main() -> None:
     output_path = args.output if args.output is not None else output_path_for(log_path, args.env_id, args.episode)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=args.dpi)
+    plotted = sum(1 for value in x_values if value == value)  # NaN separators excluded
     print(f"[PLOT] log={log_path}")
-    print(f"[PLOT] rows={len(rows)} plotted={len(x_values)} env_id={args.env_id} episode={args.episode}")
+    print(f"[PLOT] rows={len(rows)} plotted={plotted} env_id={args.env_id} episode={args.episode}")
     print(f"[PLOT] saved={output_path}")
 
     if args.show:
