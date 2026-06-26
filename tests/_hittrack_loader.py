@@ -41,9 +41,14 @@ def _ensure_stub_packages() -> None:
         name = ".".join(parts[:i])
         if name not in sys.modules:
             mod = types.ModuleType(name)
-            # Only the leaf ``mdp`` stub needs a real __path__ so intra-package submodule
-            # imports (hitting / reference_source / reference_planner) load from disk.
-            mod.__path__ = [_MDP_DIR] if name == _PKG else []
+            # Point each stub at its real on-disk directory so intra-package submodule imports
+            # (mdp kernels here, but also real siblings like ``table_tennis_sac.sac`` that other
+            # test files import) resolve from disk -- WITHOUT executing the isaaclab-importing
+            # package __init__. This keeps the loader collection-order-independent.
+            d = _MDP_DIR
+            for _ in range(len(parts) - i):
+                d = os.path.dirname(d)
+            mod.__path__ = [d]
             sys.modules[name] = mod
 
 
