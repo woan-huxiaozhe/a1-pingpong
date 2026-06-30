@@ -1,0 +1,62 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_e89af9b68621c9::t_3579480a65cda4 28
+tests/test_hittrack_observations.py
+  s_e89af9b68621c9::t_a21b43f7ec7e4a 9
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/observations.py
+  s_e89af9b68621c9::t_a2063f56126d52 1-52
+tests/test_hittrack_reference_planner.py
+  s_e89af9b68621c9::t_bab27b0a68eae5 7
+scripts/rsl_rl/play_hittrack.py
+  s_e89af9b68621c9::t_2a16da26533879 89
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/rewards.py
+  s_e89af9b68621c9::t_906314c0ac98e2 1-33
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/terminations.py
+  s_e89af9b68621c9::t_bd00b5784eb752 1-17
+tests/test_hittrack_baking.py
+  s_e89af9b68621c9::t_f4a9e4c87992ab 16
+tests/test_hittrack_terminations.py
+  s_e89af9b68621c9::t_e3d7324f5cf0e7 8
+tests/test_hittrack_env_cfg.py
+  s_e89af9b68621c9::t_13a23645e10aff 26-27
+  s_e89af9b68621c9::t_9749aa8b040b8f 53
+  s_e89af9b68621c9::t_f017e28e6f5dc7 31,49
+  s_e89af9b68621c9::t_74f1271b4fad55 8
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/__init__.py
+  s_e89af9b68621c9::t_3082fc8c23b964 1-28
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/__init__.py
+  s_e89af9b68621c9::t_2e2ae7894dc90b 1-18
+docs/hittrack_方案简介.md
+  s_e89af9b68621c9::t_92346cd983b819 84-86,89-95,97-104
+  s_e89af9b68621c9::t_96916458c0927f 114
+tests/test_hittrack_rewards.py
+  s_e89af9b68621c9::t_b108230ce44486 29
+tests/_hittrack_loader.py
+  s_e89af9b68621c9::t_c6e94eeeb8b162 1,3-14,27,38-49,53-65,67
+docs/superpowers/specs/2026-06-26-hittrack-design.md
+  s_e89af9b68621c9::t_7e725ecbdf68d0 5-7
+scripts/sac_table_tennis/train.py
+  s_e89af9b68621c9::t_101b2af57145c3 97
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/reference_commands.py
+  s_e89af9b68621c9::t_5ac56d762b690b 19-20
+docs/superpowers/plans/2026-06-26-hittrack-implementation.md
+  s_e89af9b68621c9::t_d49e227e291e11 5-6
+docs/sac_table_tennis_architecture.md
+  s_e89af9b68621c9::t_921e99bc6388fc 1114
+  s_e89af9b68621c9::t_ec2c43da2dc2e5 1083
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "4f371abd0bba5146827b4e62eabce4114c96f5c7",
+  "prompts": {},
+  "sessions": {
+    "s_e89af9b68621c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "afa86206-cc8c-472a-8ffd-feeddcde386a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
