@@ -1,0 +1,26 @@
+scripts/rsl_rl/train.py
+  s_5fb82e7c8f9c99::t_fad731515c0f2f 112-121
+scripts/rsl_rl/rsl_rl_compat.py
+  s_5fb82e7c8f9c99::t_63f6f6c3f342ff 1-292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "a085a705a8575af0a511ea3a105fac000a1decf8",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_5fb82e7c8f9c99": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "50dac59c-f22b-4b05-811a-629a2038cd88",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
