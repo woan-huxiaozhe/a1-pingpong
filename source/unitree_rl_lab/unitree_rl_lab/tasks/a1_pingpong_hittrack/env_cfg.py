@@ -8,8 +8,9 @@ time; the ball is out of the MDP. The reference is produced at runtime by
 ``mdp.hit_ref_pos`` / ``mdp.hit_ref_vel``.
 
 Control runs at 100 Hz (``decimation=2``, ``sim.dt=0.005``, ``step_dt=0.01``) to match the real
-control loop; Catch stays at 50 Hz. The scene, ready pose, robot placement and physics are
-reused verbatim from the Catch config; only the action scale (halved for 100 Hz) differs.
+control loop; Catch stays at 50 Hz. The scene / robot placement come from the forehand base task
+with the ball DROPPED (it is out of the MDP); the ready pose, physics and action scale (halved for
+100 Hz) are owned here directly.
 """
 
 from __future__ import annotations
@@ -26,27 +27,45 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
 import unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp as mdp
+from unitree_rl_lab.assets.robots.a1 import A1_ARM_VELOCITY
 from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
-    OPP_TABLE_CENTER_X,
-    RACKET_BODY_NAME,
-    RIGHT_ARM_JOINT_NAMES,
-    ROBOT_SIDE,
-    TABLE_Z,
-)
-from unitree_rl_lab.tasks.table_tennis_sac.env_cfg import (
-    A1TableTennisSacSceneCfg,
-    SAC_BALL_LINEAR_DAMPING,
-    SAC_MAX_JOINT_VELOCITY,
-    SAC_READY_JOINT_POS,
-    SAC_READY_LIFT_POS,
-    SAC_ROBOT_BASE_X,
-    SAC_ROBOT_X,
+    X1TableTennisSceneCfg,
 )
 
+# --- Robot / scene facts (inlined; HitTrack no longer inherits constants from the Catch SAC
+# env cfg). These are physical facts of the A1 + table + ball scene, owned here directly. The
+# scene class itself comes from the forehand base task -- the SAC scene was a no-op `pass`
+# subclass of it, so this drops the table_tennis_sac.env_cfg dependency entirely. ---
+ROBOT_SIDE = -1  # +1 = robot at +X, -1 = robot at -X (flipped); A1 runs flipped
+RACKET_BODY_NAME = "Link_yb_paddle"
+RIGHT_ARM_JOINT_NAMES = [
+    "joint_yb_1",
+    "joint_yb_2",
+    "joint_yb_3",
+    "joint_yb_4",
+    "joint_yb_5",
+    "joint_yb_6",
+    "joint_yb_7",
+]
+TABLE_Z = 0.76  # table surface height (m)
+OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0.5*(0+1.37), ROBOT_SIDE=-1
+ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE  # = -1.82; robot base placement
+MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  # = [8,8,8,20,20,20,20]
+
+# --- Tuning carried over from the Catch SAC config, now OWNED (forked) by HitTrack. Changes to
+# the Catch ready pose / lift no longer propagate here. ---
+READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]
+READY_LIFT_POS = -0.22
+
 # --- HitTrack constants (v1, 100 Hz) ---
-# HIT_PLANE_X = SAC_ROBOT_X  # = -1.37
-HIT_PLANE_X = -1.44 # = -1.42; move the hit plane slightly forward to avoid clipping the racket
+# HIT_PLANE_X = -1.37  # old plane = the Catch robot_x (was SAC_ROBOT_X)
+HIT_PLANE_X = -1.44 # = -1.44; move the hit plane slightly forward to avoid clipping the racket
 HITTRACK_TARGET_XYZ = (OPP_TABLE_CENTER_X, 0.0, TABLE_Z)
+# Synthetic-serve sampling box: the (y,z,vx,vy,vz) ranges of a virtual ball state AT the hit plane.
+# ONLY used by the synthetic source (curriculum (1)/(2)) -- i.e. when ``HITTRACK_USE_BAKED=False``.
+# Under the default baked mode the reset reads whole recorded trajectories from the npz and this box
+# drives nothing (the bake script derives its own serve range from the real data + bake-time gates,
+# not from here). Kept as the synthetic fallback / ablation toggle.
 HITTRACK_BOX = {
     "y": (-0.2, 0.3),
     "z": (0.9, 1.25),
@@ -65,7 +84,7 @@ W_POS = 20.0
 W_VEL = 20.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.6, 0.6)
+REACH_Y = (-0.4, 0.4)
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
@@ -83,7 +102,7 @@ class ActionsCfg:
         joint_names=RIGHT_ARM_JOINT_NAMES,
         action_scale=0.06,  # 100 Hz: halved from Catch's 0.12
         smoothing=0.5,
-        max_joint_velocity=SAC_MAX_JOINT_VELOCITY,
+        max_joint_velocity=MAX_JOINT_VELOCITY,
     )
 
 
@@ -177,7 +196,7 @@ class EventCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "joint_names": RIGHT_ARM_JOINT_NAMES,
-            "joint_pos": SAC_READY_JOINT_POS,
+            "joint_pos": READY_JOINT_POS,
         },
     )
     reset_reference = EventTerm(
@@ -211,7 +230,7 @@ class TerminationsCfg:
 
 @configclass
 class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
-    scene: A1TableTennisSacSceneCfg = A1TableTennisSacSceneCfg(num_envs=2048, env_spacing=5.0)
+    scene: X1TableTennisSceneCfg = X1TableTennisSceneCfg(num_envs=2048, env_spacing=5.0)
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     rewards: RewardsCfg = RewardsCfg()
@@ -226,12 +245,14 @@ class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         self.sim.physx.enable_ccd = True
-        self.scene.ball.spawn.rigid_props.linear_damping = SAC_BALL_LINEAR_DAMPING
-        self.scene.robot.init_state.pos = (SAC_ROBOT_BASE_X, 0.0, 0.0)
+        # HitTrack does not model the ball (it is out of the MDP); drop the inert rigid body so
+        # PhysX never simulates it. IsaacLab's InteractiveScene skips ``asset_cfg is None`` entities.
+        self.scene.ball = None
+        self.scene.robot.init_state.pos = (ROBOT_BASE_X, 0.0, 0.0)
         if ROBOT_SIDE < 0:
             self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         joint_pos = dict(self.scene.robot.init_state.joint_pos)
-        joint_pos["joint_lift"] = SAC_READY_LIFT_POS
+        joint_pos["joint_lift"] = READY_LIFT_POS
         self.scene.robot.init_state.joint_pos = joint_pos
         # Curriculum (3): switch the reference source to the baked real serves (lazy-loaded
         # on the first reset onto env.device).
