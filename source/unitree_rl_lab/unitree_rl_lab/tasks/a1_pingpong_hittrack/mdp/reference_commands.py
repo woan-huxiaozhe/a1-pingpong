@@ -136,6 +136,7 @@ def reset_reference_command(
     step_dt,
     reach_y_range,
     reach_z_range,
+    restitution=None,
     noise_params=None,
     baked=None,
     baked_path=None,
@@ -199,10 +200,11 @@ def reset_reference_command(
 
     target = torch.tensor(target_xyz, device=device).reshape(1, 3).repeat(k, 1)
     # plan clean (constant) and noisy (per-step) references at reset (planner is memoryless)
-    pc, vc, nc = plan_hit_reference(clean[:, :3], clean[:, 3:6], target)
+    plan_kw = {} if restitution is None else {"restitution": restitution}
+    pc, vc, nc = plan_hit_reference(clean[:, :3], clean[:, 3:6], target, **plan_kw)
     flat = noisy_stream.reshape(k * n_steps, 6)
     target_flat = target.repeat_interleave(n_steps, dim=0)
-    pn, vn, nn = plan_hit_reference(flat[:, :3], flat[:, 3:6], target_flat)
+    pn, vn, nn = plan_hit_reference(flat[:, :3], flat[:, 3:6], target_flat, **plan_kw)
 
     env._ht_p_ref_clean[ids], env._ht_v_ref_clean[ids], env._ht_n_ref_clean[ids] = pc, vc, nc
     env._ht_p_ref_noisy_stream[ids] = pn.reshape(k, n_steps, 3)

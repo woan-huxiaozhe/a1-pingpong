@@ -61,6 +61,12 @@ READY_LIFT_POS = -0.22
 # HIT_PLANE_X = -1.37  # old plane = the Catch robot_x (was SAC_ROBOT_X)
 HIT_PLANE_X = -1.44 # = -1.44; move the hit plane slightly forward to avoid clipping the racket
 HITTRACK_TARGET_XYZ = (OPP_TABLE_CENTER_X, 0.0, TABLE_Z)
+# Paddle restitution used by the v_ref planner. HitTrack-LOCAL on purpose: the ball is out of the
+# MDP, so v_ref is the paddle velocity that returns the ball on the REAL robot -> use the real
+# rubber's normal coefficient (~0.9), NOT the sim a1.usd material 0.75 that the Catch task's
+# in-sim physics reward must match. Higher e => less paddle speed needed (0.75 -> 0.9 lowers the
+# commanded |v_ref| from ~1.54 to ~1.23 m/s, matching the traditional controller).
+HIT_RESTITUTION = 0.9
 # Synthetic-serve sampling box: the (y,z,vx,vy,vz) ranges of a virtual ball state AT the hit plane.
 # ONLY used by the synthetic source (curriculum (1)/(2)) -- i.e. when ``HITTRACK_USE_BAKED=False``.
 # Under the default baked mode the reset reads whole recorded trajectories from the npz and this box
@@ -78,8 +84,9 @@ MAX_PREP_S = 0.98  # baked real serves are seen from ball-x in [0.6,1.5]; flight
 POST_MARGIN_S = 0.12
 STEP_DT = 0.01  # 100 Hz control (decimation=2 * sim.dt=0.005)
 SIGMA_T = 0.03
-SIGMA_P = 0.03
-SIGMA_V = 0.3
+SIGMA_P = 0.05
+# SIGMA_V = 0.3
+SIGMA_V = 1.0  # looser velocity tracking to avoid overfitting to the synthetic source; the real serves are more diverse
 W_POS = 20.0
 W_VEL = 20.0
 SUCCESS_POS = 0.05
@@ -211,6 +218,7 @@ class EventCfg:
             "step_dt": STEP_DT,
             "reach_y_range": REACH_Y,
             "reach_z_range": REACH_Z,
+            "restitution": HIT_RESTITUTION,
         },
     )
     update_ref = EventTerm(

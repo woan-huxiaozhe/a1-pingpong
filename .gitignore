@@ -78,6 +78,10 @@ datasets
 
 # Mimic
 *.npz
+# ...but DO track the HitTrack baked reference (the raw recordings in data/ are gitignored, so
+# this npz is the only reproducible training-reference artifact). Negation must follow *.npz.
+!source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/hittrack_references.npz
+*.npz.bak-*
 
 # Reference papers (keep out of repo, too large)
 docs/*.pdf
