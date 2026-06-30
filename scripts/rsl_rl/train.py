@@ -209,6 +209,41 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         os.path.join(log_dir, "params", os.path.basename(inspect.getfile(env_cfg.__class__))),
     )
 
+    # HitTrack: stream the end-effector hit-tracking error + success rate to TensorBoard once per
+    # iteration. The stock RSL-RL logger only writes Train/Loss/Episode scalars; HitTrack sums the
+    # tracking error (pos/vel magnitude + per-axis |Δ| at the hit instant) and successes into env-side
+    # GLOBAL accumulators (see ``mdp.reference_commands``), which we drain here -- exactly once per
+    # iteration, right after the runner's own ``log`` -- so each point is the mean over that
+    # iteration's rollout window (``num_steps_per_env`` * ``num_envs`` env-steps). The drain returns
+    # None for every non-HitTrack task (the buffers never get created), so this hook is a safe no-op
+    # elsewhere; keys carry a ``hittrack/`` "/" so the logger writes them as their own TB tags.
+    try:
+        from unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.reference_commands import (
+            pop_hittrack_tracking_stats,
+        )
+    except Exception:
+        pop_hittrack_tracking_stats = None
+    if pop_hittrack_tracking_stats is not None:
+        _ht_axis_keys = (
+            "pos_err_total", "pos_err_x", "pos_err_y", "pos_err_z",
+            "vel_err_total", "vel_err_x", "vel_err_y", "vel_err_z",
+        )
+        _base_logger_log = runner.logger.log
+
+        def _log_with_hittrack(*log_args, **log_kwargs):
+            _base_logger_log(*log_args, **log_kwargs)
+            stats = pop_hittrack_tracking_stats(env.unwrapped)
+            writer = runner.logger.writer
+            if writer is None or stats is None:
+                return
+            it = log_kwargs.get("it", log_args[0] if log_args else runner.current_learning_iteration)
+            writer.add_scalar("hittrack/hit_count", stats["hit_count"], it)
+            writer.add_scalar("hittrack/success_rate", stats["success_rate"], it)
+            for key in _ht_axis_keys:
+                writer.add_scalar(f"hittrack/{key}", stats[key], it)
+
+        runner.logger.log = _log_with_hittrack
+
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 

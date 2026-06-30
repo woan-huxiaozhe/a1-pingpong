@@ -84,7 +84,7 @@ W_POS = 20.0
 W_VEL = 20.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.4, 0.4)
+REACH_Y = (-0.2, 0.2)
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
@@ -244,7 +244,7 @@ class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
-        self.sim.physx.enable_ccd = True
+        self.sim.physx.enable_ccd = False
         # HitTrack does not model the ball (it is out of the MDP); drop the inert rigid body so
         # PhysX never simulates it. IsaacLab's InteractiveScene skips ``asset_cfg is None`` entities.
         self.scene.ball = None
