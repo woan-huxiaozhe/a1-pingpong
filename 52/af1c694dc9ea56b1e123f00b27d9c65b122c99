@@ -1,0 +1,31 @@
+.gitignore
+  s_8de912907c07aa::t_22ee3204a3b7a3 81-84
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/reference_commands.py
+  s_8de912907c07aa::t_3bea87dd2fb6f9 139
+  s_8de912907c07aa::t_fc7b6c5f0a0717 203-204,207
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_8de912907c07aa::t_19a5607c39a17d 221
+  h_c9d7340f891f95 87-89
+  s_8de912907c07aa::t_12505f2ebb2ca5 64-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "52af1c694dc9ea56b1e123f00b27d9c65b122c99",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_8de912907c07aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a66dc3dc-0ce2-473e-b696-c9d5e16af25a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
