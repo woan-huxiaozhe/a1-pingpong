@@ -1,0 +1,53 @@
+scripts/rsl_rl/train.py
+  s_b9ba26b45f86ff::t_3fbda1d89b2bc9 212-246
+docs/command_lines.md
+  h_c9d7340f891f95 72,79,90-100
+  s_77d2888dec42c4::t_43830cafc08874 75-76,78,80-89
+scripts/rsl_rl/plot_hittrack_record.py
+  s_77d2888dec42c4::t_3dba103916db7c 1-207
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  h_c9d7340f891f95 87,247
+scripts/rsl_rl/play_hittrack.py
+  s_77d2888dec42c4::t_d5099f718caf5e 141
+  s_77d2888dec42c4::t_bd05e467c16ef0 233
+  s_77d2888dec42c4::t_30f34e3a67183e 282-301
+  s_77d2888dec42c4::t_904a3ed2d0249e 384-386
+  s_77d2888dec42c4::t_984622245bd9ae 311-317
+  s_77d2888dec42c4::t_415296f6b845b1 95
+  s_77d2888dec42c4::t_9d076b940bb387 93
+  s_77d2888dec42c4::t_904cc9d3309782 65-70
+  s_77d2888dec42c4::t_d4f77612dde331 119-140,142-158,160-175,177-182,184-208
+  s_77d2888dec42c4::t_e1eb147c6f0ea3 176,183
+  s_77d2888dec42c4::t_34a2f9243bd4a0 82
+  s_77d2888dec42c4::t_dd1f6938cf9354 159
+  s_77d2888dec42c4::t_8d2f824efdff58 310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "e5f770a310f860723e3c6a551a5f8dd75316ee41",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_77d2888dec42c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66c73a3b-ea87-4b25-81fa-c1e07ee58e8b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_b9ba26b45f86ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "155ba283-bdd7-4eba-9d5c-bed5a88a38e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
