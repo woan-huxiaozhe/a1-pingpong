@@ -94,7 +94,7 @@ from isaaclab.utils.io import dump_yaml  # noqa: E402
 
 import unitree_rl_lab.tasks  # noqa: F401, E402
 from unitree_rl_lab.tasks.table_tennis_sac.event_tags import EVENT_TAGS, EVENT_TO_BIT  # noqa: E402
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_commands import (  # noqa: E402
+from unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.reference_commands import (  # noqa: E402
     pop_hittrack_tracking_stats,
 )
 from unitree_rl_lab.tasks.table_tennis_sac.replay import (  # noqa: E402

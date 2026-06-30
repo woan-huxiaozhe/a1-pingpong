@@ -5,7 +5,7 @@ import types
 import pytest
 import torch
 
-term = pytest.importorskip("unitree_rl_lab.tasks.table_tennis_sac.mdp.terminations",
+term = pytest.importorskip("unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.terminations",
                            reason="isaaclab not installed")
 
 

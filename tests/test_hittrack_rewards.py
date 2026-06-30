@@ -26,6 +26,6 @@ def test_far_from_hit_time_gates_to_zero():
 
 def test_reward_wrappers_exist():
     rewards = pytest.importorskip(
-        "unitree_rl_lab.tasks.table_tennis_sac.mdp.rewards",
+        "unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.rewards",
         reason="isaaclab not installed")
     assert hasattr(rewards, "hit_ref_pos") and hasattr(rewards, "hit_ref_vel")

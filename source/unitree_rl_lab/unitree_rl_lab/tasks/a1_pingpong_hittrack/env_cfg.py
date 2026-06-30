@@ -25,7 +25,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
-import unitree_rl_lab.tasks.table_tennis_sac.mdp as mdp
+import unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp as mdp
 from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
     OPP_TABLE_CENTER_X,
     RACKET_BODY_NAME,

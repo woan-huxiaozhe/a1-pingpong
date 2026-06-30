@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **NOTE (2026-06-30 refactor):** HitTrack has since been extracted into its own task package `a1_pingpong_hittrack` (gym id `A1-Pingpong-HitTrack`, trained with RSL-RL PPO). The paths and task id below reflect the ORIGINAL `table_tennis_sac`-additive layout this plan was executed under. `hitting.py` and `_racket_body_state` still live in `table_tennis_sac` and are imported by the new package. See `docs/hittrack_方案简介.md` for the current layout.
+
 **Goal:** Add a new, non-end-to-end RL task `A1-TableTennis-SAC-HitTrack` where the arm tracks a model-derived end-effector hit reference (`p_ref, v_ref, n_ref`) at the predicted ball hit time, with no ball in the MDP.
 
 **Architecture:** Purely additive to the shared `table_tennis_sac` package. A pure-torch planner (`reference_planner.py`, wraps existing `hitting.py`) converts a hit-plane ball state into an end-effector reference at runtime. A reference-command manager (`reference_commands.py`) samples a serve per episode (synthetic source first; baked-real source later), runs the planner at reset to fill per-step `noisy`(actor)/`clean`(critic) reference streams + `tau_true`, and advances a cursor each control step. Reward = Gaussian time-gated position + velocity tracking error. A new env cfg (`hittrack_env_cfg.py`) at 100 Hz wires the new terms; Catch is untouched.

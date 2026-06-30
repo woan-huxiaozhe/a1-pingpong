@@ -5,7 +5,7 @@ import pytest
 
 def test_cfg_constructs_at_100hz_with_tracking_rewards():
     cfgmod = pytest.importorskip(
-        "unitree_rl_lab.tasks.table_tennis_sac.hittrack_env_cfg", reason="isaaclab not installed")
+        "unitree_rl_lab.tasks.a1_pingpong_hittrack.env_cfg", reason="isaaclab not installed")
     cfg = cfgmod.HitTrackEnvCfg()
     assert cfg.decimation == 2 and abs(cfg.sim.dt - 0.005) < 1e-9
     rew = cfg.rewards
@@ -23,12 +23,12 @@ def test_task_registered():
     # The Isaac-free module loader (tests/_hittrack_loader.py) registers stub `unitree_rl_lab.*`
     # packages in sys.modules to bypass the isaaclab-importing package __init__. Those stubs would
     # shadow the real package here, so drop them and import the real one -- importing
-    # `table_tennis_sac` only runs gym.register with lazy string entry points (no isaaclab), so this
-    # stays Isaac-free.
+    # `a1_pingpong_hittrack` only runs gym.register with lazy string entry points (no isaaclab), so
+    # this stays Isaac-free.
     for name in [m for m in sys.modules if m == "unitree_rl_lab" or m.startswith("unitree_rl_lab.")]:
         del sys.modules[name]
 
-    import unitree_rl_lab.tasks.table_tennis_sac  # noqa: F401  triggers registration
+    import unitree_rl_lab.tasks.a1_pingpong_hittrack  # noqa: F401  triggers registration
     assert "A1-Pingpong-HitTrack" in gym.registry
 
 
@@ -46,9 +46,9 @@ def test_task_registered_with_ppo_entry_point():
     for name in [m for m in sys.modules if m == "unitree_rl_lab" or m.startswith("unitree_rl_lab.")]:
         del sys.modules[name]
 
-    import unitree_rl_lab.tasks.table_tennis_sac  # noqa: F401  triggers registration
+    import unitree_rl_lab.tasks.a1_pingpong_hittrack  # noqa: F401  triggers registration
 
     spec = gym.registry["A1-Pingpong-HitTrack"]
     assert spec.kwargs.get("rsl_rl_cfg_entry_point") == (
-        "unitree_rl_lab.tasks.table_tennis_sac.agents.rsl_rl_ppo_cfg:HitTrackPPORunnerCfg"
+        "unitree_rl_lab.tasks.a1_pingpong_hittrack.agents.rsl_rl_ppo_cfg:HitTrackPPORunnerCfg"
     )

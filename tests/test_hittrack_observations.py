@@ -6,7 +6,7 @@ import pytest
 import torch
 
 obs = pytest.importorskip(
-    "unitree_rl_lab.tasks.table_tennis_sac.mdp.observations",
+    "unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.observations",
     reason="isaaclab not installed")
 
 

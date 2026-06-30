@@ -4,7 +4,7 @@ import torch
 
 from _hittrack_loader import load_pure
 
-load_pure("hitting")  # resolve reference_planner's intra-package dependency first
+load_pure("hitting", pkg="table_tennis_sac")  # resolve reference_planner's intra-package dependency first
 plan_hit_reference = load_pure("reference_planner").plan_hit_reference
 
 

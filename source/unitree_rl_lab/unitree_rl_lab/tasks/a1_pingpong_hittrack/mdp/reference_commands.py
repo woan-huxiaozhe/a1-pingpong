@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_planner import plan_hit_reference
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_source import (
+from .reference_planner import plan_hit_reference
+from .reference_source import (
     is_reachable,
     phase_scaled_ball_noise,
     sample_hit_ball_states,

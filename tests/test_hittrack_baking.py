@@ -13,7 +13,7 @@ _BAKE_PATH = os.path.join(
     "unitree_rl_lab",
     "unitree_rl_lab",
     "tasks",
-    "table_tennis_sac",
+    "a1_pingpong_hittrack",
     "bake_hittrack_references.py",
 )
 

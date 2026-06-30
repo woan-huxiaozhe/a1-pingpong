@@ -86,7 +86,7 @@ from isaaclab_tasks.utils import get_checkpoint_path  # noqa: E402
 from rsl_rl.runners import OnPolicyRunner  # noqa: E402
 
 import unitree_rl_lab.tasks  # noqa: F401, E402
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_commands import pop_hittrack_tracking_stats  # noqa: E402
+from unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp.reference_commands import pop_hittrack_tracking_stats  # noqa: E402
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg  # noqa: E402
 
 PARK_OFFSET = (0.0, 0.0, -5.0)  # where to stash the unused ball (env-local), far from arm + camera

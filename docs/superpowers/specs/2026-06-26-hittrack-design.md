@@ -2,8 +2,9 @@
 
 - **日期**: 2026-06-26
 - **分支**: `hitter`
-- **新任务**: `A1-TableTennis-SAC-HitTrack`(**不**退役现有 `A1-TableTennis-SAC-Catch`)
-- **代码根**: `source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac`
+- **新任务**: `A1-Pingpong-HitTrack`(**不**退役现有 `A1-TableTennis-SAC-Catch`)
+- **代码根**: `source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack`
+- **重构注记 (2026-06-30)**: HitTrack 已从 `table_tennis_sac` 抽成上述独立 task 包,仅 import 复用其共享基建(场景/机器人/通用 MDP 项/`hitting.py`);本 spec 余下正文沿用原 `table_tennis_sac` 增量布局与旧任务 id 描述,当前布局以 `docs/hittrack_方案简介.md` 为准。
 - **来源**: 本 spec 是 `docs/sac_table_tennis_architecture.md` §15「Proposed Model-Based Hit-Reference Refactor」的逐条细化与落地版,与该节配套阅读。
 - **目标**: 把当前端到端的接球/回球 SAC 任务,改造为**非端到端、模型化的"击球参考跟踪"任务**——轨迹预测器给出击球面球态 → 参考规划器换算成末端击球参考 `(p_ref, v_ref, n_ref)` → 机械臂策略在击球时刻跟踪该参考。**球离开 RL 的 MDP**;奖励从"球结果"改为"击球时刻参考跟踪误差"。预测问题(KF)与控制问题(策略)彻底解耦。
 

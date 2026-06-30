@@ -77,15 +77,3 @@ def joint_state_nan(env: ManagerBasedRLEnv) -> torch.Tensor:
     done = torch.any(torch.isnan(robot.data.joint_pos), dim=-1) | torch.any(torch.isnan(robot.data.joint_vel), dim=-1)
     capture_sac_final_info(env, done)
     return done
-
-
-def hit_window_elapsed(env) -> torch.Tensor:
-    """End the episode once the hit-time tracking window has fully closed.
-
-    True once ``episode_length_buf > hit_step + round(post_margin/step_dt)`` (i.e.
-    ``tau_true < -post_margin``). Used only by the A1-Pingpong-HitTrack task; it reads
-    the ``_ht_*`` buffers maintained by ``mdp.reference_commands`` and is ball/tracker-free.
-    """
-    margin = getattr(env, "_ht_post_margin_steps", 12)
-    done = env.episode_length_buf.to(torch.long) > (env._ht_hit_step + margin)
-    return done

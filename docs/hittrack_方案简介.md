@@ -81,23 +81,27 @@ HitTrack 把链路**切成两段**：
 
 ## 6. 代码结构
 
-新增任务**完全增量**：不改 `env_cfg.py`，不删除任何 Catch 依赖的共享函数，
-共享文件只做**追加**。
+HitTrack **自成独立 task 包** `a1_pingpong_hittrack`：所有 HitTrack 专属代码集中于此，
+对 Catch(`table_tennis_sac`)只做 **import 复用**（场景/机器人常量/通用 MDP 项/击球物理
+`hitting.py`），不改、不删 Catch 任何代码。
 
 ```
-tasks/table_tennis_sac/
-├── hittrack_env_cfg.py          # 新增：HitTrackEnvCfg / HitTrackPlayEnvCfg（100 Hz）
-├── bake_hittrack_references.py  # 新增：真机日志 → 100 Hz 参考流（纯 numpy，离线）
-├── __init__.py                  # 追加：gym.register("A1-Pingpong-HitTrack")
+tasks/a1_pingpong_hittrack/           # 独立 task 包（HitTrack 专属）
+├── env_cfg.py                    # HitTrackEnvCfg / HitTrackPlayEnvCfg（100 Hz）
+├── bake_hittrack_references.py   # 真机日志 → 100 Hz 参考流（纯 numpy，离线）
+├── hittrack_references.npz       # 烘焙输出的参考流数据
+├── __init__.py                   # gym.register("A1-Pingpong-HitTrack")（含 PPO entry point）
+├── agents/
+│   └── rsl_rl_ppo_cfg.py         # HitTrackPPORunnerCfg（RSL-RL PPO 训练）
 └── mdp/
-    ├── tracking.py            # 新增：time_gate / gaussian_score / hit_track_terms（纯 torch）
-    ├── reference_planner.py   # 新增：plan_hit_reference（包裹 hitting.ideal_racket_velocity）
-    ├── reference_source.py    # 新增：采样盒 / tau 流 / 相位噪声 / 可达性判定（纯 torch）
-    ├── reference_commands.py  # 新增：env 端 reset_reference_command / update_hit_track_state
-    ├── observations.py        # 追加：hit_reference_command(_clean) / hit_ref_pos|vel_error
-    ├── rewards.py             # 追加：hit_ref_pos / hit_ref_vel
-    ├── terminations.py        # 追加：hit_window_elapsed
-    └── __init__.py            # 追加：导出上述新模块
+    ├── tracking.py            # time_gate / gaussian_score / hit_track_terms（纯 torch）
+    ├── reference_planner.py   # plan_hit_reference（包裹 table_tennis_sac.mdp.hitting）
+    ├── reference_source.py    # 采样盒 / tau 流 / 相位噪声 / 横向增强 / 可达性（纯 torch）
+    ├── reference_commands.py  # env 端 reset_reference_command / update_hit_track_state
+    ├── observations.py        # hit_reference_command(_clean) / hit_ref_pos|vel_error
+    ├── rewards.py             # hit_ref_pos / hit_ref_vel
+    ├── terminations.py        # hit_window_elapsed
+    └── __init__.py            # 聚合：复用 table_tennis_sac.mdp + 导出上述 HitTrack 模块
 ```
 
 `reset_reference_command` 在 reset 时一次性把整段 noisy 流 + clean 状态喂给 memoryless
@@ -107,8 +111,7 @@ tasks/table_tennis_sac/
 
 ## 7. 与 Catch 任务的关系
 
-- HitTrack 与 Catch 共用 `table_tennis_sac` 包，但 **MDP 互不影响**。
-- 仅**导入**（不修改）Catch 的场景、就绪位姿、机器人摆位、物理参数等常量。
+- HitTrack 自成独立包 `a1_pingpong_hittrack`；仅 **import 复用**（不修改）Catch 的场景、就绪位姿、机器人摆位、物理参数、通用 MDP 项与击球物理 `hitting.py`。
 - 平滑正则项原样复用 Catch 配置，保证两任务 sim-to-real 行为一致。
 
 ## 8. 现状与待办

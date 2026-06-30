@@ -1080,7 +1080,7 @@ Add or refactor these components:
 Recommended task id:
 
 ```text
-A1-TableTennis-SAC-HitTrack
+A1-Pingpong-HitTrack
 ```
 
 ### Validation Metrics
@@ -1111,7 +1111,7 @@ Deployment dry-run metrics should compare planner output and robot execution:
 ### Migration Order
 
 1. Freeze the current end-to-end SAC task as `A1-TableTennis-SAC-Catch`.
-2. Add `A1-TableTennis-SAC-HitTrack` with no ball-outcome rewards.
+2. Add `A1-Pingpong-HitTrack` with no ball-outcome rewards.
 3. Implement the reference planner as a standalone tested module.
 4. Reuse the existing FK helpers and joint-history observations.
 5. Reuse the current KF-style position/time noise, then add velocity noise once
