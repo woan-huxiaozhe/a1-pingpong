@@ -29,4 +29,26 @@ def test_task_registered():
         del sys.modules[name]
 
     import unitree_rl_lab.tasks.table_tennis_sac  # noqa: F401  triggers registration
-    assert "A1-TableTennis-SAC-HitTrack" in gym.registry
+    assert "A1-Pingpong-HitTrack" in gym.registry
+
+
+def test_task_registered_with_ppo_entry_point():
+    """HitTrack is trained with RSL-RL PPO (not SAC): the registration must expose an
+    `rsl_rl_cfg_entry_point` so `scripts/rsl_rl/train.py` / `play.py` can resolve the runner cfg.
+
+    `gym.register` only stores the entry-point *string* (it never imports `isaaclab_rl.rsl_rl`,
+    which needs USD/`pxr`), so this assertion stays Isaac-free -- it just inspects the stored kwargs.
+    """
+    import sys
+
+    import gymnasium as gym
+
+    for name in [m for m in sys.modules if m == "unitree_rl_lab" or m.startswith("unitree_rl_lab.")]:
+        del sys.modules[name]
+
+    import unitree_rl_lab.tasks.table_tennis_sac  # noqa: F401  triggers registration
+
+    spec = gym.registry["A1-Pingpong-HitTrack"]
+    assert spec.kwargs.get("rsl_rl_cfg_entry_point") == (
+        "unitree_rl_lab.tasks.table_tennis_sac.agents.rsl_rl_ppo_cfg:HitTrackPPORunnerCfg"
+    )

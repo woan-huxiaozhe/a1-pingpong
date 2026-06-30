@@ -888,7 +888,7 @@ class joint_jerk_l2(ManagerTermBase):
 # Time-gated Gaussian position / velocity tracking of the noisy end-effector reference
 # (D1=a) with the gate driven by the privileged ``_ht_tau_true``. The per-term magnitude is
 # carried by the ``RewardTermCfg.weight`` (20/20), matching the repo convention, so ``w_*``
-# here stay at 1.0. Used only by the A1-TableTennis-SAC-HitTrack task.
+# here stay at 1.0. Used only by the A1-Pingpong-HitTrack task.
 
 
 def hit_ref_pos(env, racket_body_name: str, *, sigma_t: float, sigma_p: float, w_pos: float = 1.0):

@@ -21,6 +21,7 @@ from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_source import (
     is_reachable,
     phase_scaled_ball_noise,
     sample_hit_ball_states,
+    sample_lateral_shift,
     tau_streams,
 )
 
@@ -28,31 +29,85 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
-def _ensure_ht_buffers(env, n_steps: int):
-    n, device = env.num_envs, env.device
-    if hasattr(env, "_ht_p_ref_clean") and getattr(env, "_ht_n_steps", None) == n_steps:
+def ensure_ht_runtime_buffers(env):
+    """Create the per-step ("current row") reference + success/flag buffers that the HitTrack
+    observation, reward and termination terms read every step. These are ``n_steps``-independent
+    (``[n,3]`` / ``[n]``), so this is safe to call BEFORE the first reset -- which matters because
+    the ``ObservationManager`` probes each obs term's output shape by calling its ``func`` once at
+    env construction, before any reset event has populated the ``_ht_*`` buffers. Idempotent: a
+    no-op once the buffers exist (the reset overwrites their contents in place)."""
+    if hasattr(env, "_ht_p_ref_clean"):
         return
-    env._ht_n_steps = n_steps
+    n, device = env.num_envs, env.device
 
     def z3():
         return torch.zeros(n, 3, device=device)
 
-    def zT3():
-        return torch.zeros(n, n_steps, 3, device=device)
-
     env._ht_p_ref_clean, env._ht_v_ref_clean, env._ht_n_ref_clean = z3(), z3(), z3()
     env._ht_p_ref_noisy, env._ht_v_ref_noisy, env._ht_n_ref_noisy = z3(), z3(), z3()
-    env._ht_p_ref_noisy_stream, env._ht_v_ref_noisy_stream, env._ht_n_ref_noisy_stream = zT3(), zT3(), zT3()
-    env._ht_tau_true_stream = torch.zeros(n, n_steps, device=device)
-    env._ht_tau_noisy_stream = torch.zeros(n, n_steps, device=device)
     env._ht_tau_true = torch.zeros(n, device=device)
     env._ht_tau_noisy = torch.zeros(n, device=device)
-    env._ht_valid_len = torch.full((n,), n_steps, dtype=torch.long, device=device)
-    env._ht_hit_step = torch.zeros(n, dtype=torch.long, device=device)
     env._ht_hit_done = torch.zeros(n, dtype=torch.bool, device=device)
     env._ht_success = torch.zeros(n, dtype=torch.bool, device=device)
     env._ht_pos_err_at_hit = torch.full((n,), float("nan"), device=device)
     env._ht_vel_err_at_hit = torch.full((n,), float("nan"), device=device)
+
+    # --- end-effector tracking-error accumulators (global, NOT per-env) ---
+    # Filled at the hit instant in ``update_hit_track_state`` and drained by the train loop via
+    # ``pop_hittrack_tracking_stats``. They are scalars/[3] not indexed by env, so the per-env
+    # reset (which IsaacLab runs inside ``step`` before it returns) cannot wipe them -- this is why
+    # the hit error is summed here at tau~=0 rather than read back at episode ``done``.
+    env._ht_acc_n = torch.zeros((), dtype=torch.long, device=device)  # hits in the window
+    env._ht_acc_success = torch.zeros((), dtype=torch.long, device=device)
+    env._ht_acc_pe_sum = torch.zeros((), device=device)  # sum ||p_racket - p_ref_clean||
+    env._ht_acc_ve_sum = torch.zeros((), device=device)  # sum ||v_racket - v_ref_clean||
+    env._ht_acc_pe_abs = torch.zeros(3, device=device)  # sum |Δp| per axis (x,y,z)
+    env._ht_acc_ve_abs = torch.zeros(3, device=device)  # sum |Δv| per axis (x,y,z)
+
+
+def pop_hittrack_tracking_stats(env):
+    """Drain the windowed end-effector tracking-error accumulators (means over every hit since the
+    last call), then zero them. Returns ``None`` when the HitTrack buffers were never created (e.g.
+    the Catch task) or no hit landed in the window. Errors are measured at the hit instant
+    (``tau~=0``) against the CLEAN true-crossing reference -- the same quantity the success gate
+    uses, and ~= the commanded (noisy) reference there since the KF noise vanishes at the hit."""
+    if not hasattr(env, "_ht_acc_n"):
+        return None
+    n = int(env._ht_acc_n.item())
+    if n == 0:
+        return None
+    inv = 1.0 / n
+    pe_abs = (env._ht_acc_pe_abs * inv).tolist()
+    ve_abs = (env._ht_acc_ve_abs * inv).tolist()
+    stats = {
+        "hit_count": n,
+        "success_rate": float(env._ht_acc_success.item()) * inv,
+        "pos_err_total": float(env._ht_acc_pe_sum.item()) * inv,
+        "vel_err_total": float(env._ht_acc_ve_sum.item()) * inv,
+        "pos_err_x": pe_abs[0], "pos_err_y": pe_abs[1], "pos_err_z": pe_abs[2],
+        "vel_err_x": ve_abs[0], "vel_err_y": ve_abs[1], "vel_err_z": ve_abs[2],
+    }
+    for buf in (env._ht_acc_n, env._ht_acc_success, env._ht_acc_pe_sum,
+                env._ht_acc_ve_sum, env._ht_acc_pe_abs, env._ht_acc_ve_abs):
+        buf.zero_()
+    return stats
+
+
+def _ensure_ht_buffers(env, n_steps: int):
+    n, device = env.num_envs, env.device
+    if hasattr(env, "_ht_p_ref_noisy_stream") and getattr(env, "_ht_n_steps", None) == n_steps:
+        return
+    env._ht_n_steps = n_steps
+    ensure_ht_runtime_buffers(env)  # current-row + flag buffers (may already exist from the obs probe)
+
+    def zT3():
+        return torch.zeros(n, n_steps, 3, device=device)
+
+    env._ht_p_ref_noisy_stream, env._ht_v_ref_noisy_stream, env._ht_n_ref_noisy_stream = zT3(), zT3(), zT3()
+    env._ht_tau_true_stream = torch.zeros(n, n_steps, device=device)
+    env._ht_tau_noisy_stream = torch.zeros(n, n_steps, device=device)
+    env._ht_valid_len = torch.full((n,), n_steps, dtype=torch.long, device=device)
+    env._ht_hit_step = torch.zeros(n, dtype=torch.long, device=device)
 
 
 def load_baked_references(path: str, device) -> dict:
@@ -132,6 +187,13 @@ def reset_reference_command(
         tau_true_stream = tau_streams(tau_baked[:, 0], n_steps, step_dt)
         valid_len = valid_baked.clamp(max=n_steps).to(torch.long)
 
+        # lateral (y) data-augmentation: real serves cluster in the central ~half of the reach band,
+        # so shift each one to a uniform y target across the full band (pure translation preserves
+        # vy / timing / z). Applied to clean + every noisy-stream row by the same Δy => consistent.
+        dy = sample_lateral_shift(clean[:, 1], reach_y_range)  # [k]
+        clean[:, 1] = clean[:, 1] + dy
+        noisy_stream[:, :, 1] = noisy_stream[:, :, 1] + dy.unsqueeze(1)
+
     hit_step = torch.round(tau_true_stream[:, 0] / step_dt).long()
     tau_noisy_stream = tau_true_stream.clone()
 
@@ -200,3 +262,14 @@ def update_hit_track_state(
         env._ht_vel_err_at_hit[at_hit] = ve[at_hit]
         env._ht_success[at_hit] = ok[at_hit]
         env._ht_hit_done[at_hit] = True
+
+        # accumulate this step's hits into the global tracking-error window (drained by the train
+        # loop). Per-axis errors are |Δ| against the clean reference; kept on-device (no host sync).
+        dp = (racket_pos - env._ht_p_ref_clean)[at_hit]
+        dv = (racket_vel - env._ht_v_ref_clean)[at_hit]
+        env._ht_acc_n += at_hit.sum()
+        env._ht_acc_success += ok[at_hit].sum()
+        env._ht_acc_pe_sum += pe[at_hit].sum()
+        env._ht_acc_ve_sum += ve[at_hit].sum()
+        env._ht_acc_pe_abs += dp.abs().sum(dim=0)
+        env._ht_acc_ve_abs += dv.abs().sum(dim=0)

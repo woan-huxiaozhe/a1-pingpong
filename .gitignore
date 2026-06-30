@@ -84,3 +84,5 @@ docs/*.pdf
 
 # Patch/merge backup artifacts
 *.orig
+
+data/

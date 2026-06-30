@@ -13,14 +13,19 @@ import pathlib
 import sys
 
 sys.path.insert(0, f"{pathlib.Path(__file__).parent.parent}")
-from list_envs import import_packages  # noqa: F401
+try:
+    import list_envs  # noqa: F401  importing runs its module-level import_packages(), registering tasks
 
-sys.path.pop(0)
-
-tasks = []
-for task_spec in gym.registry.values():
-    if "Isaac" not in task_spec.id:
-        tasks.append(task_spec.id)
+    tasks = [task_spec.id for task_spec in gym.registry.values() if "Isaac" not in task_spec.id]
+except Exception:
+    # Task packages import ``pxr`` (USD), which Isaac Sim 5.x only exposes AFTER AppLauncher launches
+    # the kit app (below). The pre-launch listing then raises (e.g. table_tennis_sac.mdp ->
+    # isaaclab.envs.mdp -> pxr). Leave ``--task`` unrestricted; the id is validated at ``gym.make``
+    # time and all tasks are registered by ``import unitree_rl_lab.tasks``. Matches play.py / the SAC
+    # trainer, which both launch the app before importing any task package.
+    tasks = None
+finally:
+    sys.path.pop(0)
 
 import argparse
 

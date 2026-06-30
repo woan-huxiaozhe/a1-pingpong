@@ -42,3 +42,19 @@ def is_reachable(p_hit: torch.Tensor, y_range, z_range) -> torch.Tensor:
     """Loose workspace box gate on the hit-plane ``(y,z)``. Returns ``[n]`` bool."""
     y, z = p_hit[:, 1], p_hit[:, 2]
     return (y >= y_range[0]) & (y <= y_range[1]) & (z >= z_range[0]) & (z <= z_range[1])
+
+
+def sample_lateral_shift(y_cross: torch.Tensor, y_range, *, margin: float = 0.05, gen=None) -> torch.Tensor:
+    """Lateral (y) data-augmentation shift ``Δy[n]`` for baked real serves.
+
+    Real recordings only span the central ~half of the reachable lateral band, so the policy never
+    sees the arm reaching the y extremes. A pure y-translation is physically exact (it preserves
+    ``vy`` / timing / z-bounce -- the same serve aimed laterally), so we draw a UNIFORM target
+    ``y_target ~ U(y_lo+margin, y_hi-margin)`` and return ``Δy = y_target - y_cross``. Applying it to
+    every y channel of the clean state + noisy stream spreads the crossings uniformly across the
+    full reachable width regardless of the recordings' original (centered) clustering.
+    """
+    lo = y_range[0] + margin
+    hi = y_range[1] - margin
+    y_target = lo + (hi - lo) * torch.rand(y_cross.shape, generator=gen, device=y_cross.device, dtype=y_cross.dtype)
+    return y_target - y_cross

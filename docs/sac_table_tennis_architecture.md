@@ -1,6 +1,6 @@
 # A1 Table Tennis SAC Training Architecture
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 This document is the architecture note for the independent SAC table-tennis pipeline. When the SAC task's observation, action, reward, replay, event logic, latency model, training loop, or TensorBoard logging changes, update this file in the same change.
 
@@ -67,8 +67,8 @@ Current incoming ball:
 ```python
 SAC_FIXED_MIDDLE_BALL = {
     "x_range": (1.0, 1.0),
-    "y_range": (-0.05, 0.15),
-    "z_range": (1.08, 1.18),
+    "y_range": (0.0, 0.20),
+    "z_range": (1.15, 1.25),
     "vx_range": (3.8 * ROBOT_SIDE, 4.3 * ROBOT_SIDE),
     "vy_range": (0.0, 0.0),
     "vz_range": (1.05, 1.35),
@@ -765,3 +765,359 @@ Deferred stages:
 - Spin.
 - More realistic command and vision latency.
 - Hardware-oriented policy export and safety filtering.
+
+## 15. Proposed Model-Based Hit-Reference Refactor
+
+This section is a proposal for replacing the current end-to-end catch/return SAC
+episode with a non-end-to-end, model-based hit-reference tracking task.
+
+### Motivation
+
+The current SAC task asks one policy to solve the whole chain:
+
+```text
+incoming ball -> contact exploration -> impact physics -> return quality -> landing outcome
+```
+
+This makes the reward sparse and entangled. A policy can learn reliable contact
+or a short soft hit without learning the real objective, and most reward/debug
+work becomes about separating bad contact, weak return, edge contact, lobs, and
+ball-physics artifacts.
+
+The proposed task moves the ball and return objective out of the RL episode:
+
+```text
+trajectory predictor -> hit-plane ball state -> model-based reference planner
+                   -> arm policy tracks end-effector reference at hit time
+```
+
+The RL problem becomes a bounded arm-control problem: given joint-state history,
+a noisy hit-time reference, and time-to-hit, make the paddle blade center pass
+through the requested strike-plane pose/velocity at the requested time while
+staying smooth and inside hardware limits.
+
+### Runtime Data Flow
+
+Deployment data flow:
+
+```text
+KF / trajectory predictor
+  -> ball state at hit plane: p_ball_hit, v_ball_hit, tau_hit
+  -> reference planner
+  -> paddle reference: p_ref, v_ref, optional n_ref, tau_hit
+  -> policy/controller
+  -> q_target for the 7 right-arm joints
+  -> low-level joint position/MIT tracking
+```
+
+Training data flow:
+
+```text
+reference sampler or recorded predictor rows
+  -> clean reference command
+  -> noisy actor reference command, clean critic reference command
+  -> A1 arm-only simulation
+  -> hit-time FK tracking reward
+```
+
+The policy no longer receives ball history and the reward no longer depends on
+ball contact, net crossing, opponent-table landing, or post-hit ball motion.
+
+### Hit Plane And Reference Planner
+
+Make the strike plane a single explicit constant, for example:
+
+```text
+HIT_PLANE_X = <chosen contact plane>
+```
+
+The current SAC code uses `SAC_ROBOT_X = -1.37` for the actor/critic hit command
+while some historical KF notes refer to `x = -1.47`, which is currently the
+unhit miss boundary (`SAC_ROBOT_X - SAC_MISS_MARGIN`). The refactor should first
+choose one physical contact plane and use the same value in prediction,
+reference generation, training, evaluation, and deployment.
+
+Reference planner contract:
+
+```text
+input:
+  p_ball_hit = [x_hit, y_hit, z_hit]
+  v_ball_hit = [vx_hit, vy_hit, vz_hit]
+  tau_hit
+  desired return target or fixed return style
+
+output:
+  p_ref      = blade-center position at hit time
+  v_ref      = blade-center linear velocity at hit time
+  n_ref      = optional blade normal / face orientation at hit time
+  tau_hit
+  validity   = reachable / unsafe / out-of-range flag
+```
+
+`p_ref` should normally keep the blade center on the ball path at the hit plane.
+`v_ref` and `n_ref` come from a model-based no-spin impact solve or a calibrated
+lookup that chooses the outgoing ball velocity needed for the desired return.
+Even if the first implementation keeps a fixed blade normal, the planner should
+own that choice rather than hiding it in the reward. Paddle orientation is part
+of returning the ball; position and linear velocity alone are not a complete
+physical strike description.
+
+### Prediction And Noise Model
+
+Reuse the existing `estimated_hit_command_at_robot_x` idea, but change what the
+policy consumes.
+
+Current actor command:
+
+```text
+[p_hit_x, p_hit_y, p_hit_z, tau]
+```
+
+Proposed actor command:
+
+```text
+[p_ref, v_ref, optional n_ref, tau_hit]
+```
+
+The current KF-calibrated noise model already captures phase-dependent
+position/time error with per-episode bias plus small per-step jitter. It should
+remain the base model for `p_ref` and `tau_hit`, because deployment sees the
+same kind of persistent per-ball prediction bias.
+
+The missing piece is velocity error. The proposed planner requires
+`v_ball_hit`, so deployment realism needs one of these before full sim-to-real
+training:
+
+- derive a `v_hit` residual model from the same gated-KF snapshots used for the
+  current hit-point residuals;
+- or start with clean/reference velocity in sim, explicitly marking that as a
+  first-phase assumption, then add velocity noise before hardware deployment.
+
+Actor/critic asymmetry can stay useful:
+
+- actor sees noisy deployable reference;
+- critic may additionally see the clean reference and clean FK velocities;
+- the auxiliary reconstruction head can predict the clean/private reference
+  block from the noisy actor command.
+
+### Observation Contract
+
+The actor observation should be reduced to deployable arm state plus the planned
+hit reference.
+
+Recommended actor terms:
+
+| Term | Dim | Meaning |
+| --- | ---: | --- |
+| `joint_pos_history` | `Kq * 7` | Multi-step right-arm joint positions, or current joint position plus recent deltas. |
+| `joint_delta_history` | `Kd * 7` | Deployable velocity/trend proxy from encoder differences. |
+| `last_action` | 7 | Previous normalized action, kept for action smoothing context. |
+| `reference_command` | `7 or 10` | `[p_ref(3), v_ref(3), tau_hit(1)]`, plus optional `n_ref(3)`. |
+| `racket_ref_error` | `6 or 9` | Optional FK-derived `[p_racket - p_ref, v_racket - v_ref]`, plus optional normal error. |
+
+`racket_ref_error` is deployable because it is computed from joint encoders and
+the reference command. It is not privileged. It may make learning much easier
+than forcing the MLP to reconstruct FK from joint history alone.
+
+Remove from actor:
+
+- `ball_pos_history`
+- `ball_pos_rel_racket`
+- `estimated_hit_command` as a raw ball intercept
+- all post-hit or landing-related signals
+
+Recommended critic-private terms:
+
+| Term | Dim | Meaning |
+| --- | ---: | --- |
+| `joint_vel` | 7 | Clean simulator joint velocity. |
+| `racket_vel` | 3 | Clean blade-center velocity. |
+| `racket_ang_vel` | 3 | Clean paddle angular velocity, useful for spin/edge-contact regularization if kept. |
+| `clean_reference_command` | `7 or 10` | Noise-free reference from the sampler/planner. |
+| `time_to_hit_clean` | 1 | Clean countdown if actor `tau_hit` is noised. |
+
+The critic does not need clean ball state unless the reference planner is being
+trained or debugged inside the environment. In the main tracking task, the ball
+should be outside the RL MDP.
+
+### Action Contract
+
+The minimum-change path can keep the current `JointDeltaTargetAction`:
+
+```text
+policy action [-1, 1]^7 -> joint position target delta -> smoothing/rate limit -> q_target
+```
+
+This keeps the low-level control semantics aligned with the current SAC task and
+deployment baseline. The reward will train the policy to choose joint targets
+that produce the requested paddle velocity at `tau_hit`.
+
+A stronger second-stage option is a reference-residual controller:
+
+```text
+IK / trajectory generator: p_ref, v_ref, tau_hit -> q_ref(t), qd_ref(t)
+policy action -> residual around q_ref
+```
+
+This reintroduces a reference-tracking structure, but it is not the old static
+motion-library `ReferenceResidualJointAction`. The reference is generated online
+from the predicted hit-plane command.
+
+### Reward Contract
+
+Remove the ball-outcome reward ladder:
+
+- `hit_bonus`
+- `return_cross_net`
+- `bad_hit`
+- `table_proximity`
+- `return_bonus`
+- `landing_placement`
+- `flat_return`
+- `post_hit_outgoing`
+- `post_hit_net_clearance`
+- all disabled pre-hit and post-hit ball-shaping hooks
+
+Keep hardware/smoothness regularizers:
+
+- `action_rate`
+- `joint_acc`
+- `joint_jerk`
+- `joint_limit`
+- `joint_effort_margin`
+
+Add only hit-time reference tracking rewards. The main score should be evaluated
+at the closest policy step to `tau_hit = 0`, or through a narrow time gate so 50
+Hz control has a usable gradient:
+
+```text
+time_gate = exp(-0.5 * (tau_hit / sigma_t)^2)
+pos_score = exp(-||p_racket - p_ref||^2 / (2 * sigma_p^2))
+vel_score = exp(-||v_racket - v_ref||^2 / (2 * sigma_v^2))
+normal_score = exp(-angle(n_racket, n_ref)^2 / (2 * sigma_n^2))  # optional
+
+reward =
+  w_pos * time_gate * pos_score
+  + w_vel * time_gate * vel_score
+  + w_normal * time_gate * normal_score
+  + smoothness / limit regularizers
+```
+
+Initial tolerances should reflect the real predictor and control problem:
+
+| Parameter | Starting value | Reason |
+| --- | ---: | --- |
+| `sigma_t` | `0.02-0.04 s` | Covers one or two 50 Hz policy steps. |
+| `sigma_p` | `0.02-0.04 m` | Comparable to the current KF-level hit-point error. |
+| `sigma_v` | `0.3-0.6 m/s` | Loose enough for early learning; tighten after reachable commands are stable. |
+| `sigma_n` | `10-15 deg` | Only needed if planner outputs blade normal. |
+
+If strict "only at hit time" learning is too sparse, the first relaxation should
+still stay inside the same tracking objective: widen `sigma_t` or add a
+time-to-go trajectory reference. Do not reintroduce ball-outcome rewards unless
+the task is intentionally moved back toward end-to-end training.
+
+### Episode And Reset Logic
+
+Episode reset should sample a reference command instead of launching a ball:
+
+1. sample or load a hit-plane ball state;
+2. run the reference planner;
+3. reject unreachable or unsafe references;
+4. initialize the robot at the ready pose;
+5. set `tau_hit` to the planner horizon;
+6. step the arm until `tau_hit < 0` plus a small margin;
+7. terminate after the hit-time tracking window is evaluated.
+
+Suggested episode length:
+
+```text
+episode_length = tau_hit_initial + 0.10-0.20 s
+```
+
+This removes most of the old 2.5 s ball-flight episode and concentrates samples
+near the control problem that matters.
+
+### Replay And Training
+
+The current event tables are no longer the main sampling primitive because
+there are no `hit`, `return`, `valid_return`, `bad_hit`, or `miss` events.
+
+Recommended first pass:
+
+- keep SAC implementation and uniform replay;
+- optionally add a simple `hit_window` table that stores transitions where
+  `abs(tau_hit) < 0.10 s`;
+- keep actor/critic observation split only if clean-vs-noisy reference improves
+  learning stability;
+- keep auxiliary reconstruction only for clean reference / clean velocity
+  prediction, not as a reward.
+
+This task may also be suitable for supervised or trajectory-optimization
+pretraining, but that is optional. The architecture boundary should not depend
+on SAC.
+
+### Implementation Slice
+
+Minimal new task path:
+
+```text
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/
+```
+
+Add or refactor these components:
+
+| Component | Proposed file area | Responsibility |
+| --- | --- | --- |
+| `HitReferenceCommand` | `mdp/commands.py` or new `mdp/reference_commands.py` | Sample/load hit-plane states, run planner, keep clean/noisy reference and countdown. |
+| reference planner | new `reference_planner.py` | Convert `p_ball_hit, v_ball_hit, tau` to `p_ref, v_ref, n_ref`. Pure Python/Torch, unit-testable without Isaac. |
+| observations | `mdp/observations.py` | Joint history, reference command, FK reference error. Reuse existing racket FK helpers. |
+| rewards | `mdp/rewards.py` | Hit-time position/velocity/normal tracking plus existing smoothness/limit terms. |
+| terminations | `mdp/terminations.py` | End after tracking window, NaN, hard joint violation. |
+| env config | new env cfg or new task id | Do not overload `A1-TableTennis-SAC-Catch` until the old task is intentionally retired. |
+| tests | `tests/test_sac_table_tennis_pipeline.py` or new test file | Planner shape/range, countdown, reward maxima, no ball-outcome rewards active. |
+
+Recommended task id:
+
+```text
+A1-TableTennis-SAC-HitTrack
+```
+
+### Validation Metrics
+
+Primary TensorBoard cards should move from ball outcomes to reference tracking:
+
+- `episode/ref_pos_error_at_hit_mean`
+- `episode/ref_vel_error_at_hit_mean`
+- `episode/ref_normal_error_at_hit_mean` if orientation is active
+- `episode/hit_time_abs_error_mean`
+- `episode/reachable_reference_rate`
+- `episode/joint_limit_violation_rate`
+- `episode/effort_margin_mean`
+- `reward_terms/hit_ref_pos`
+- `reward_terms/hit_ref_vel`
+- `reward_terms/hit_ref_normal`
+- `reward_terms/action_rate`
+- `reward_terms/joint_acc`
+- `reward_terms/joint_jerk`
+
+Deployment dry-run metrics should compare planner output and robot execution:
+
+- predicted `p_ref/v_ref/tau_hit`;
+- realized FK `p_racket/v_racket` at the selected hit timestamp;
+- command latency from predictor update to robot command;
+- rejected references and rejection reasons.
+
+### Migration Order
+
+1. Freeze the current end-to-end SAC task as `A1-TableTennis-SAC-Catch`.
+2. Add `A1-TableTennis-SAC-HitTrack` with no ball-outcome rewards.
+3. Implement the reference planner as a standalone tested module.
+4. Reuse the existing FK helpers and joint-history observations.
+5. Reuse the current KF-style position/time noise, then add velocity noise once
+   the KF residual data is available.
+6. Train fixed-reference and small-random-reference curricula before using the
+   full real-serve hit-plane distribution.
+7. Only after tracking errors are small, run a separate offline or sim validation
+   that feeds the realized paddle `p/v/n` into the ball-impact model to estimate
+   return quality. Keep that validation outside the RL reward.

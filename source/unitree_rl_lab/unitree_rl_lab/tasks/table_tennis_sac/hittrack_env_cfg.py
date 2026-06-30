@@ -1,4 +1,4 @@
-"""A1-TableTennis-SAC-HitTrack environment config (100 Hz, non-end-to-end).
+"""A1-Pingpong-HitTrack environment config (100 Hz, non-end-to-end).
 
 A new, additive task that does NOT touch the Catch ``env_cfg.py``. The arm tracks a
 model-derived end-effector hit reference ``(p_ref, v_ref, n_ref)`` at the predicted ball hit
@@ -44,7 +44,8 @@ from unitree_rl_lab.tasks.table_tennis_sac.env_cfg import (
 )
 
 # --- HitTrack constants (v1, 100 Hz) ---
-HIT_PLANE_X = SAC_ROBOT_X  # = -1.37
+# HIT_PLANE_X = SAC_ROBOT_X  # = -1.37
+HIT_PLANE_X = -1.44 # = -1.42; move the hit plane slightly forward to avoid clipping the racket
 HITTRACK_TARGET_XYZ = (OPP_TABLE_CENTER_X, 0.0, TABLE_Z)
 HITTRACK_BOX = {
     "y": (-0.2, 0.3),
@@ -53,7 +54,8 @@ HITTRACK_BOX = {
     "vy": (-0.3, 0.3),
     "vz": (-1.0, 0.5),
 }
-MAX_PREP_S = 0.6
+MAX_PREP_S = 0.98  # baked real serves are seen from ball-x in [0.6,1.5]; flight to the hit plane
+# takes up to ~0.97 s, so the prep horizon must cover it (was 0.6 for the synthetic box).
 POST_MARGIN_S = 0.12
 STEP_DT = 0.01  # 100 Hz control (decimation=2 * sim.dt=0.005)
 SIGMA_T = 0.03
@@ -70,7 +72,7 @@ JOINT_POS_DELTA_HISTORY_LENGTH = 5
 # Curriculum (3): baked real-serve source. Off by default (curriculum (1)/(2) train on the
 # synthetic box). When on, the reset loads `HITTRACK_BAKED_PATH` (produced by
 # bake_hittrack_references.py) and samples a recorded serve per env instead of sampling the box.
-HITTRACK_USE_BAKED = False
+HITTRACK_USE_BAKED = True
 HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references.npz")
 
 
@@ -218,7 +220,7 @@ class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         self.decimation = 2  # 100 Hz control over 200 Hz physics
-        self.episode_length_s = 0.72  # ~= max_prep + post_margin (~72 steps @100 Hz)
+        self.episode_length_s = 1.10  # ~= max_prep(0.98) + post_margin(0.12) (~110 steps @100 Hz)
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material

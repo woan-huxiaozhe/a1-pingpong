@@ -17,7 +17,7 @@ from .rewards import (  # noqa: F401  explicit re-export of the Ace three-tier t
 )
 from .terminations import *  # noqa: F401, F403
 
-# HitTrack (A1-TableTennis-SAC-HitTrack) additive modules: pure-torch reference kernels and the
+# HitTrack (A1-Pingpong-HitTrack) additive modules: pure-torch reference kernels and the
 # env-facing reference-command manager. Imported here so they are reachable as ``mdp.*`` from the
 # HitTrack env cfg; the Catch task does not reference them.
 from .tracking import *  # noqa: F401, F403

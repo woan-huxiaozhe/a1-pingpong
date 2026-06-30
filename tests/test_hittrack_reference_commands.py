@@ -59,3 +59,41 @@ def test_success_recorded_at_hit_when_racket_matches_clean():
     rc.update_hit_track_state(env, None, success_pos_thresh=0.05, success_vel_thresh=0.2,
                               racket_pos=env._ht_test_racket_pos, racket_vel=env._ht_test_racket_vel)
     assert bool(env._ht_success[0])
+
+
+# --- tracking-error accumulators / pop_hittrack_tracking_stats ---------------------------------
+
+def test_pop_returns_none_without_buffers():
+    env = types.SimpleNamespace()  # never went through a reset -> no _ht_acc_*
+    assert rc.pop_hittrack_tracking_stats(env) is None
+
+
+def test_pop_returns_none_when_no_hits():
+    env = _fake_env()
+    rc.reset_reference_command(env, None, **PARAMS)  # buffers exist, but no hit accumulated yet
+    assert rc.pop_hittrack_tracking_stats(env) is None
+
+
+def test_pop_means_per_axis_and_zeroes_window():
+    env = _fake_env(n=1)
+    rc.reset_reference_command(env, None, **PARAMS)
+    hit_step = int(round((env._ht_tau_true[0].item()) / env.step_dt))
+    env.episode_length_buf[0] = hit_step
+    # racket offset from the clean reference by a known per-axis delta (within success thresholds)
+    dp = torch.tensor([[0.01, -0.02, 0.0]])
+    dv = torch.tensor([[0.1, 0.0, 0.0]])
+    rc.update_hit_track_state(
+        env, None, success_pos_thresh=0.05, success_vel_thresh=0.2,
+        racket_pos=env._ht_p_ref_clean + dp, racket_vel=env._ht_v_ref_clean + dv,
+    )
+    stats = rc.pop_hittrack_tracking_stats(env)
+    assert stats is not None
+    assert stats["hit_count"] == 1
+    assert stats["success_rate"] == 1.0  # |dp|=0.0224<0.05, |dv|=0.1<0.2
+    assert abs(stats["pos_err_total"] - float(dp.norm())) < 1e-6
+    assert abs(stats["vel_err_total"] - 0.1) < 1e-6
+    assert abs(stats["pos_err_x"] - 0.01) < 1e-6 and abs(stats["pos_err_y"] - 0.02) < 1e-6
+    assert abs(stats["pos_err_z"]) < 1e-6
+    assert abs(stats["vel_err_x"] - 0.1) < 1e-6
+    # draining the window zeroes the accumulators -> next pop is empty
+    assert rc.pop_hittrack_tracking_stats(env) is None

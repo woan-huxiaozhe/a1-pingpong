@@ -94,6 +94,9 @@ from isaaclab.utils.io import dump_yaml  # noqa: E402
 
 import unitree_rl_lab.tasks  # noqa: F401, E402
 from unitree_rl_lab.tasks.table_tennis_sac.event_tags import EVENT_TAGS, EVENT_TO_BIT  # noqa: E402
+from unitree_rl_lab.tasks.table_tennis_sac.mdp.reference_commands import (  # noqa: E402
+    pop_hittrack_tracking_stats,
+)
 from unitree_rl_lab.tasks.table_tennis_sac.replay import (  # noqa: E402
     EpisodeTraceBuffer,
     StratifiedReplaySampler,
@@ -211,6 +214,33 @@ def _log_reward_term_stats(writer, stats: dict, step: int):
     writer.add_scalar("reward/total_mean", stats["total_sum"] * inv_steps, step)
     for term_name, value_sum in stats["term_sums"].items():
         writer.add_scalar(f"reward_terms/{term_name}", value_sum * inv_steps, step)
+
+
+# HitTrack end-effector tracking error: total (L2 norm) + per-axis |Δ| at the hit instant, for both
+# position and velocity, plus the success rate. Drained from env-side accumulators (see
+# ``mdp.reference_commands.pop_hittrack_tracking_stats``); a no-op for the Catch task / empty windows.
+_HITTRACK_AXIS_KEYS = (
+    "pos_err_total", "pos_err_x", "pos_err_y", "pos_err_z",
+    "vel_err_total", "vel_err_x", "vel_err_y", "vel_err_z",
+)
+
+
+def _log_hittrack_tracking_stats(writer, env, step: int) -> str:
+    stats = pop_hittrack_tracking_stats(env.unwrapped)
+    if stats is None:
+        return ""
+    if writer is not None:
+        writer.add_scalar("hittrack/hit_count", stats["hit_count"], step)
+        writer.add_scalar("hittrack/success_rate", stats["success_rate"], step)
+        for key in _HITTRACK_AXIS_KEYS:
+            writer.add_scalar(f"hittrack/{key}", stats[key], step)
+    return (
+        f" hits={stats['hit_count']} success={stats['success_rate']:.3f} "
+        f"pos_err={stats['pos_err_total']:.4f}(x{stats['pos_err_x']:.3f} "
+        f"y{stats['pos_err_y']:.3f} z{stats['pos_err_z']:.3f}) "
+        f"vel_err={stats['vel_err_total']:.3f}(x{stats['vel_err_x']:.3f} "
+        f"y{stats['vel_err_y']:.3f} z{stats['vel_err_z']:.3f})"
+    )
 
 
 def run_eval(env, agent, eval_steps: int, device) -> tuple[dict, int]:
@@ -422,6 +452,7 @@ def main():
                     episode_stats = _new_episode_stats()
                     _log_reward_term_stats(writer, reward_term_stats, update_count)
                     reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
+                    hittrack_summary = _log_hittrack_tracking_stats(writer, env, update_count)
                     if writer is not None:
                         for key, value in sizes.items():
                             writer.add_scalar(f"event_table/{key}", value, update_count)
@@ -431,7 +462,7 @@ def main():
                         f"[SAC] update={update_count} transitions={global_transitions} "
                         f"replay={len(replay)} alpha={last_losses['alpha']:.4f} "
                         f"critic={last_losses['critic_loss']:.4f} actor={last_losses['actor_loss']:.4f} "
-                        f"tables={sizes} batch={composition} {episode_summary}"
+                        f"tables={sizes} batch={composition} {episode_summary}{hittrack_summary}"
                     )
 
                 if update_count % args_cli.checkpoint_interval == 0:
@@ -467,6 +498,7 @@ def main():
                     episode_steps = torch.zeros(num_envs, dtype=torch.long)
                     episode_stats = _new_episode_stats()
                     reward_term_stats = _new_reward_term_stats(env.unwrapped.reward_manager)
+                    pop_hittrack_tracking_stats(env.unwrapped)  # discard hits accumulated during eval
 
                 if update_count >= args_cli.max_updates:
                     break

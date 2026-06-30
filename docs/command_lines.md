@@ -1,3 +1,5 @@
+# End2end
+
 Start training with the following command:
 ```
   /data/miniforge3/envs/isaac/bin/python scripts/sac_table_tennis/train.py \
@@ -59,3 +61,19 @@ Play with a trained agent:
 ```
 
 logs/sac_table_tennis/sim_logs/A1-TableTennis-SAC-Catch__2026-06-17_20-33-03__agent_best.csv
+
+
+# Hit Track  (PPO via rsl_rl; NOT the SAC trainer)
+# train: rsl_rl/train.py uses --max_iterations (no --max_updates/--checkpoint_interval; save_interval
+# lives in HitTrackPPORunnerCfg). Logs to logs/rsl_rl/a1_tabletennis_hittrack/<timestamp>/.
+python scripts/rsl_rl/train.py --task A1-Pingpong-HitTrack \
+    --headless \
+    --num_envs 2048 \
+    --max_iterations 20000
+
+# play: prints per-episode tracking error + aggregate. Headless avoids the laptop-GPU Vulkan crash.
+# Omitting --checkpoint auto-picks the latest model_*.pt of the latest run.
+python scripts/rsl_rl/play_hittrack.py --task A1-Pingpong-HitTrack \
+    --headless --episodes 50
+#   --checkpoint logs/rsl_rl/a1_tabletennis_hittrack/<run>/model_xxxx.pt   # or an explicit ckpt
+#   (drop --headless and add --real-time to watch a window, GPU permitting)
