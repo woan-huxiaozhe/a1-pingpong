@@ -109,7 +109,16 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+try:
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+except ImportError:
+    # IsaacLab shipped with Isaac Sim 5.1 (training box) dropped `handle_deprecated_rsl_rl_cfg`,
+    # which the dev IsaacLab (Isaac Sim 4.5 / 2.3.2) provides. Fall back to the vendored copy so the
+    # repo's legacy `policy=` cfgs still migrate at runtime on either IsaacLab version. See
+    # scripts/rsl_rl/rsl_rl_compat.py.
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+
+    from rsl_rl_compat import handle_deprecated_rsl_rl_cfg
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
