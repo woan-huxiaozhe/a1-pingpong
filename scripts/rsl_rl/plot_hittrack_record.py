@@ -7,8 +7,10 @@
 """Visualize a ``play_hittrack.py`` record CSV (the per-step / per-env snapshot written by the
 ``--record`` flag). Produces two figures for ONE (env, episode):
 
-  * Figure 1 -- joint tracking: per arm joint, (a) actual joint pos vs the policy TARGET pos,
-    (b) actual joint velocity, (c) actual applied torque.
+  * Figure 1 -- joint tracking: per arm joint, (a) actual joint pos vs the policy TARGET pos
+    (with the joint's hard position limits drawn as dashed lines; limits far outside the trace
+    are annotated at the frame edge instead of squashing the plot), (b) actual joint velocity,
+    (c) actual applied torque.
   * Figure 2 -- end-effector: blade-center position / velocity / face-normal (actual) overlaid
     with the model-derived TARGET reference command (``pref`` / ``vref`` / ``nref``, the noisy
     "estimate hit command" the actor sees; the clean privileged reference is drawn faint).
@@ -35,10 +37,22 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import sys
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
 _AXES = ("x", "y", "z")
+
+# The joint position limits the sim (and the ``joint_limit_margin_penalty`` reward) enforce come
+# from the A1 USD, which is generated from this URDF; with ``soft_joint_pos_limit_factor=1.0`` the
+# soft limits equal these hard <limit> values. We read them straight from the URDF (stdlib XML, no
+# Isaac dependency, no stale hard-coded numbers). Path is resolved relative to this script.
+_DEFAULT_URDF = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir, os.pardir,
+    "source", "unitree_rl_lab", "data", "robots", "a1", "a1.urdf",
+))
 
 
 def _find_latest_csv() -> str | None:
@@ -79,7 +93,57 @@ def _hit_index(rows) -> int:
     return int(np.argmin(np.abs(rows["tau_true"])))
 
 
-def _plot_joints(plt, t, rows, joints, hit_t, title):
+def _urdf_joint_limits(joints, urdf_path):
+    """Map ``joint_name -> (lower, upper)`` position limits from a URDF ``<limit>`` tag.
+
+    Joints missing from the URDF (or a URDF that cannot be read at all) are silently skipped --
+    the limit lines are optional decoration, so a missing file just means we draw none.
+    """
+    try:
+        root = ET.parse(urdf_path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        print(f"[PLOT] no joint limits (could not read URDF '{urdf_path}': {exc})", file=sys.stderr)
+        return {}
+    out = {}
+    for jn in joints:
+        jel = root.find(f"./joint[@name='{jn}']")
+        lim = jel.find("limit") if jel is not None else None
+        if lim is None:
+            continue
+        lo, hi = lim.get("lower"), lim.get("upper")
+        if lo is not None and hi is not None:
+            out[jn] = (float(lo), float(hi))
+    return out
+
+
+def _draw_limit_lines(ax, lo, hi, label=False):
+    """Overlay lower/upper joint-limit lines on a position axis without wrecking its scale.
+
+    The axis stays driven by the actual/target traces; we only extend it toward a limit that is
+    within half a data-span of the trace, so a joint pinned against its stop is obvious while a
+    joint with lots of headroom keeps its tracking detail. A limit that stays far off-view is
+    annotated at the frame edge (with its value) instead of squashing the plot.
+    """
+    ax.relim()
+    ax.autoscale_view()
+    d0, d1 = ax.get_ylim()
+    span = max(d1 - d0, 1.0e-6)
+    view_lo = min(d0, max(lo, d0 - 0.5 * span))
+    view_hi = max(d1, min(hi, d1 + 0.5 * span))
+    pad = 0.05 * max(view_hi - view_lo, 1.0e-6)
+    ax.set_ylim(view_lo - pad, view_hi + pad)
+    ax.axhline(lo, color="0.45", ls="--", lw=1.0, alpha=0.8, label="limit" if label else "_nolegend_")
+    ax.axhline(hi, color="0.45", ls="--", lw=1.0, alpha=0.8, label="_nolegend_")
+    vlo, vhi = ax.get_ylim()
+    if lo < vlo:
+        ax.text(0.99, 0.02, f"↓ limit {lo:+.2f}", transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=7, color="0.45")
+    if hi > vhi:
+        ax.text(0.99, 0.98, f"↑ limit {hi:+.2f}", transform=ax.transAxes, ha="right", va="top",
+                fontsize=7, color="0.45")
+
+
+def _plot_joints(plt, t, rows, joints, limits, hit_t, title):
     n = len(joints)
     fig, axes = plt.subplots(n, 3, figsize=(13, 1.9 * n), sharex=True, squeeze=False)
     axes[0, 0].set_title("joint pos: actual vs target [rad]")
@@ -90,6 +154,9 @@ def _plot_joints(plt, t, rows, joints, hit_t, title):
         ax_p, ax_v, ax_t = axes[j]
         ax_p.plot(t, rows[f"q_{jn}"], color="C0", lw=1.3, label="actual")
         ax_p.plot(t, rows[f"q_tgt_{jn}"], color="C3", ls="--", lw=1.2, label="target")
+        lim = limits.get(jn)
+        if lim is not None:
+            _draw_limit_lines(ax_p, lim[0], lim[1], label=(j == 0))
         ax_v.plot(t, rows[f"qd_{jn}"], color="C2", lw=1.2)
         ax_t.plot(t, rows[f"torque_{jn}"], color="C4", lw=1.2)
         for ax in (ax_p, ax_v, ax_t):
@@ -143,6 +210,11 @@ def main():
     ap.add_argument("--outdir", type=str, default=None, help="where to save PNGs (default: next to the CSV).")
     ap.add_argument("--show", action="store_true", help="open interactive windows instead of saving PNGs.")
     ap.add_argument("--list", action="store_true", help="list (env, ep) pairs in the CSV and exit.")
+    ap.add_argument("--urdf", type=str, default=None,
+                    help="URDF to read arm joint position limits from (default: repo A1 URDF). "
+                         "Limit lines are skipped if it cannot be read.")
+    ap.add_argument("--no-limits", dest="no_limits", action="store_true",
+                    help="do not draw the joint position-limit lines on the joint-pos plots.")
     args = ap.parse_args()
 
     csv = args.csv or _find_latest_csv()
@@ -187,7 +259,8 @@ def main():
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig1 = _plot_joints(plt, t, rows, joints, hit_t, f"HitTrack joints -- {tag}")
+    limits = {} if args.no_limits else _urdf_joint_limits(joints, args.urdf or _DEFAULT_URDF)
+    fig1 = _plot_joints(plt, t, rows, joints, limits, hit_t, f"HitTrack joints -- {tag}")
     fig2 = _plot_end_effector(plt, t, rows, hit_t, f"HitTrack end-effector -- {tag}")
 
     if args.show:
