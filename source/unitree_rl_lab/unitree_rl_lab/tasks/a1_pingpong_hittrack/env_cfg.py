@@ -109,8 +109,21 @@ class ActionsCfg:
     right_arm = mdp.JointDeltaTargetActionCfg(
         asset_name="robot",
         joint_names=RIGHT_ARM_JOINT_NAMES,
-        action_scale=0.06,  # 100 Hz: halved from Catch's 0.12
-        smoothing=0.5,
+        # 0.06 -> 0.10: the 0.06 (halved-from-Catch) scale was THE swing-speed bottleneck. Play-CSV
+        # telemetry (model_1500) showed the policy SATURATING the action (raw |act|~1.85, clamped to
+        # 1) on the proximal joints while joint-vel utilization was only 16-36% and torque/limits were
+        # slack -> the arm reached just ~56% of the commanded v_ref_x (verr_x~0.54). A zero-cost
+        # inference sweep on model_1500 confirmed the direction: scale 0.06->0.10 lifted x-reach to
+        # ~72% and cut verr_x to ~0.33. Note J1-3 are still bounded by max_joint_velocity*step_dt=0.08
+        # (their 8 rad/s hw limit) via compute_joint_delta_target's rate cap; J4-7 get the full 0.10.
+        action_scale=0.10,
+        # 0.5 -> 0.7: `smoothing` is the EMA blend toward the raw target, so HIGHER = more responsive
+        # (less lag), not smoother-slower. The same sweep showed smoothing 0.8 beat 0.5 on swing speed
+        # (0.3 was worse); 0.7 pairs with the larger scale for a faster target ramp without going fully
+        # unfiltered. Retrained (resume from model_1500) so the policy re-calibrates position precision
+        # to the higher authority (inference-only overrides raised perr past 0.05 -- an expected
+        # train/test mismatch, recovered by retraining).
+        smoothing=0.7,
         max_joint_velocity=MAX_JOINT_VELOCITY,
     )
 

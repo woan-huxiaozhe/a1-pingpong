@@ -68,6 +68,12 @@ parser.add_argument("--record", type=str, nargs="?", const="__auto__", default="
                          "Pass a path, or bare --record to auto-name next to the checkpoint. "
                          "One row per (env, control step) -- large num_envs => large file.")
 parser.add_argument("--no_record", action="store_true", help="Disable the data-recording CSV.")
+parser.add_argument("--smoothing", type=float, default=None,
+                    help="Override the action-term target smoothing (EMA factor) at inference. For "
+                         "zero-cost A/B swing-speed checks WITHOUT retraining (the policy net output "
+                         "is unchanged; only the action->joint-target mapping changes).")
+parser.add_argument("--action_scale", type=float, default=None,
+                    help="Override the action-term action_scale at inference (same A/B purpose).")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -217,6 +223,13 @@ def main():
         use_fabric=not args_cli.disable_fabric,
         entry_point_key="play_env_cfg_entry_point",
     )
+    # inference-side action-term overrides (A/B swing-speed checks; do not affect the policy net)
+    if args_cli.smoothing is not None:
+        env_cfg.actions.right_arm.smoothing = args_cli.smoothing
+        print(f"[PLAY] OVERRIDE action smoothing -> {args_cli.smoothing}")
+    if args_cli.action_scale is not None:
+        env_cfg.actions.right_arm.action_scale = args_cli.action_scale
+        print(f"[PLAY] OVERRIDE action_scale -> {args_cli.action_scale}")
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = RslRlVecEnvWrapper(env)
     raw = env.unwrapped
