@@ -235,15 +235,25 @@ def update_hit_track_state(
     racket_pos=None,
     racket_vel=None,
 ):
-    step = env.episode_length_buf.to(torch.long)
-    cursor = step.clamp(min=0)
-    cursor = torch.minimum(cursor, env._ht_valid_len - 1)
+    step = env.episode_length_buf.to(torch.long).clamp(min=0)
+    # p/v/n references: HELD at the converged hit value past the valid window (the ball is out of
+    # the MDP, so no post-crossing prediction exists). This freezes the *target point* at p_hit.
+    cursor = torch.minimum(step, env._ht_valid_len - 1)
+    # tau: NOT clamped to valid_len -- let it count through 0 into negative during the post-hit
+    # margin so the Gaussian time-gate CLOSES symmetrically (follow-through) instead of being pinned
+    # open ~12 steps at gate~=0.98. ``tau_true_stream`` already extends linearly negative (see
+    # ``tau_streams``). Without this the identical static ``p_ref`` is rewarded ~13x over the held
+    # window, which makes "park at p_ref" beat "swing through it" -- the root cause of the near-zero
+    # contact velocity. Only the reward gate + observed tau change here; the success latch and
+    # ``hit_window_elapsed`` termination key off ``step``/``_ht_hit_step`` directly, so the
+    # measurement instant and episode length are unchanged.
+    tau_cursor = step.clamp(max=env._ht_n_steps - 1)
     arange = torch.arange(env.num_envs, device=env.device)
     env._ht_p_ref_noisy = env._ht_p_ref_noisy_stream[arange, cursor]
     env._ht_v_ref_noisy = env._ht_v_ref_noisy_stream[arange, cursor]
     env._ht_n_ref_noisy = env._ht_n_ref_noisy_stream[arange, cursor]
-    env._ht_tau_noisy = env._ht_tau_noisy_stream[arange, cursor]
-    env._ht_tau_true = env._ht_tau_true_stream[arange, cursor]
+    env._ht_tau_noisy = env._ht_tau_noisy_stream[arange, tau_cursor]
+    env._ht_tau_true = env._ht_tau_true_stream[arange, tau_cursor]
 
     at_hit = (step == env._ht_hit_step) & (~env._ht_hit_done)
     if bool(at_hit.any()):

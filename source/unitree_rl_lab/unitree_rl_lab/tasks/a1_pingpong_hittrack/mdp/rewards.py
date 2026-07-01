@@ -8,9 +8,9 @@ Used only by the A1-Pingpong-HitTrack task.
 
 from __future__ import annotations
 
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_state
+from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_state, racket_normal
 
-from .tracking import hit_track_terms
+from .tracking import hit_track_terms, normal_align_term
 
 
 def hit_ref_pos(env, racket_body_name: str, *, sigma_t: float, sigma_p: float, w_pos: float = 1.0):
@@ -31,3 +31,15 @@ def hit_ref_vel(env, racket_body_name: str, *, sigma_t: float, sigma_v: float, w
         p_racket, center_vel, env._ht_p_ref_noisy, env._ht_v_ref_noisy, env._ht_tau_true,
         sigma_t=sigma_t, sigma_p=1.0, sigma_v=sigma_v, w_pos=0.0, w_vel=w_vel)
     return vel_term
+
+
+def hit_ref_normal(env, racket_body_name: str, *, sigma_t: float, w_normal: float = 1.0):
+    """Time-gated blade-normal alignment vs the noisy n_ref (weight carried by RewardTermCfg).
+
+    The blade normal is otherwise an unconstrained DOF (there is no orientation term besides
+    pos/vel), so it drifts to ~100 deg error at the hit instant. ``racket_normal`` is the FK
+    world-frame unit normal (deployable); ``n_ref`` is a pure direction, so the env-origin offset
+    is irrelevant (no subtraction needed, unlike position).
+    """
+    n_racket = racket_normal(env, racket_body_name)
+    return normal_align_term(n_racket, env._ht_n_ref_noisy, env._ht_tau_true, sigma_t=sigma_t, w_normal=w_normal)

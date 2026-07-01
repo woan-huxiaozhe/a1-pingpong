@@ -85,8 +85,10 @@ POST_MARGIN_S = 0.12
 STEP_DT = 0.01  # 100 Hz control (decimation=2 * sim.dt=0.005)
 SIGMA_T = 0.03
 SIGMA_P = 0.05
-# SIGMA_V = 0.3
-SIGMA_V = 1.0  # looser velocity tracking to avoid overfitting to the synthetic source; the real serves are more diverse
+# SIGMA_V history: 0.3 (too tight) -> 1.0 (too loose: a full 1.2 m/s miss still scored
+# exp(-1.2^2/2)=0.49, so the velocity shortfall was ~free and the policy never built swing speed).
+SIGMA_V = 0.5  # tightened so reaching v_ref actually pays; joints run at 15-36% of vel limits -> headroom
+W_NORMAL = 8.0  # blade-normal alignment reward weight (vs W_POS/W_VEL=20); enough to matter, not dominate
 W_POS = 20.0
 W_VEL = 20.0
 SUCCESS_POS = 0.05
@@ -169,6 +171,13 @@ class RewardsCfg:
         func=mdp.hit_ref_vel,
         weight=W_VEL,
         params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T, "sigma_v": SIGMA_V},
+    )
+    # blade-normal alignment at the hit instant (previously UNREWARDED -> normal drifted to ~100 deg
+    # error). Cosine kernel, gated identically to pos/vel via _ht_tau_true.
+    hit_ref_normal = RewTerm(
+        func=mdp.hit_ref_normal,
+        weight=W_NORMAL,
+        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T},
     )
 
     # --- sim-to-real smoothing regularizers (copied verbatim from Catch env_cfg) ---
