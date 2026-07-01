@@ -9,23 +9,7 @@
 
 
 import gymnasium as gym
-import pathlib
 import sys
-
-sys.path.insert(0, f"{pathlib.Path(__file__).parent.parent}")
-try:
-    import list_envs  # noqa: F401  importing runs its module-level import_packages(), registering tasks
-
-    tasks = [task_spec.id for task_spec in gym.registry.values() if "Isaac" not in task_spec.id]
-except Exception:
-    # Task packages import ``pxr`` (USD), which Isaac Sim 5.x only exposes AFTER AppLauncher launches
-    # the kit app (below). The pre-launch listing then raises (e.g. table_tennis_sac.mdp ->
-    # isaaclab.envs.mdp -> pxr). Leave ``--task`` unrestricted; the id is validated at ``gym.make``
-    # time and all tasks are registered by ``import unitree_rl_lab.tasks``. Matches play.py / the SAC
-    # trainer, which both launch the app before importing any task package.
-    tasks = None
-finally:
-    sys.path.pop(0)
 
 import argparse
 
@@ -42,7 +26,7 @@ parser.add_argument("--video", action="store_true", default=False, help="Record 
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, choices=tasks, help="Name of the task.")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
@@ -109,7 +93,15 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+try:
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
+except ImportError:
+    # Backward compatibility for older Isaac Lab builds that do not export
+    # ``handle_deprecated_rsl_rl_cfg`` from ``isaaclab_rl.rsl_rl``.
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+
+    def handle_deprecated_rsl_rl_cfg(agent_cfg, _installed_version):
+        return agent_cfg
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -228,21 +220,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "pos_err_total", "pos_err_x", "pos_err_y", "pos_err_z",
             "vel_err_total", "vel_err_x", "vel_err_y", "vel_err_z",
         )
-        _base_logger_log = runner.logger.log
+        if hasattr(runner, "logger") and hasattr(runner.logger, "log"):
+            _base_logger_log = runner.logger.log
 
-        def _log_with_hittrack(*log_args, **log_kwargs):
-            _base_logger_log(*log_args, **log_kwargs)
-            stats = pop_hittrack_tracking_stats(env.unwrapped)
-            writer = runner.logger.writer
-            if writer is None or stats is None:
-                return
-            it = log_kwargs.get("it", log_args[0] if log_args else runner.current_learning_iteration)
-            writer.add_scalar("hittrack/hit_count", stats["hit_count"], it)
-            writer.add_scalar("hittrack/success_rate", stats["success_rate"], it)
-            for key in _ht_axis_keys:
-                writer.add_scalar(f"hittrack/{key}", stats[key], it)
+            def _log_with_hittrack(*log_args, **log_kwargs):
+                _base_logger_log(*log_args, **log_kwargs)
+                stats = pop_hittrack_tracking_stats(env.unwrapped)
+                writer = getattr(runner.logger, "writer", None)
+                if writer is None or stats is None:
+                    return
+                it = log_kwargs.get("it", log_args[0] if log_args else runner.current_learning_iteration)
+                writer.add_scalar("hittrack/hit_count", stats["hit_count"], it)
+                writer.add_scalar("hittrack/success_rate", stats["success_rate"], it)
+                for key in _ht_axis_keys:
+                    writer.add_scalar(f"hittrack/{key}", stats[key], it)
 
-        runner.logger.log = _log_with_hittrack
+            runner.logger.log = _log_with_hittrack
+        else:
+            print("[WARN] rsl-rl runner has no `logger`; skipping HitTrack custom TB telemetry hook.")
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
