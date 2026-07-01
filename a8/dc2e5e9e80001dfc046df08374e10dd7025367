@@ -1,0 +1,26 @@
+scripts/rsl_rl/plot_hittrack_record.py
+  s_a83381c7a3788a::t_e6c5169af0a8a0 146,157-159
+  s_a83381c7a3788a::t_68afe335a6d988 96-145
+  s_a83381c7a3788a::t_57f7ef7e20bc25 262
+  s_a83381c7a3788a::t_3cbb23591b829b 10-13
+  s_a83381c7a3788a::t_7dff2f707d2180 213-217
+  s_a83381c7a3788a::t_12b1313a11aad2 40-41,47-55
+  s_a83381c7a3788a::t_34fe0cf1bb201c 263
+  s_a83381c7a3788a::t_63719588b6dea4 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "a8dc2e5e9e80001dfc046df08374e10dd7025367",
+  "prompts": {},
+  "sessions": {
+    "s_a83381c7a3788a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85ae8b70-de9c-421a-a0aa-443bec8bb9a6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
