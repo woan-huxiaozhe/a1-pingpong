@@ -85,12 +85,14 @@ POST_MARGIN_S = 0.12
 STEP_DT = 0.01  # 100 Hz control (decimation=2 * sim.dt=0.005)
 SIGMA_T = 0.03
 SIGMA_P = 0.05
-# SIGMA_V history: 0.3 (too tight) -> 1.0 (too loose: a full 1.2 m/s miss still scored
-# exp(-1.2^2/2)=0.49, so the velocity shortfall was ~free and the policy never built swing speed).
-SIGMA_V = 0.5  # tightened so reaching v_ref actually pays; joints run at 15-36% of vel limits -> headroom
-W_NORMAL = 8.0  # blade-normal alignment reward weight (vs W_POS/W_VEL=20); enough to matter, not dominate
+# Velocity retune after lowering A1 PD gains: keep the Gaussian broad enough that the resumed policy
+# still sees gradient at ~0.6 m/s error, but make the term more valuable than the old 20 * sigma=0.5
+# setup once it starts closing the x-velocity gap.
+SIGMA_V = 0.4
+SIGMA_NORMAL_DEG = 20.0  # angular Gaussian width for blade-normal alignment at the hit instant
+W_NORMAL = 12.0
 W_POS = 20.0
-W_VEL = 20.0
+W_VEL = 40.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
 REACH_Y = (-0.2, 0.2)
@@ -190,7 +192,11 @@ class RewardsCfg:
     hit_ref_normal = RewTerm(
         func=mdp.hit_ref_normal,
         weight=W_NORMAL,
-        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T},
+        params={
+            "racket_body_name": RACKET_BODY_NAME,
+            "sigma_t": SIGMA_T,
+            "sigma_normal_deg": SIGMA_NORMAL_DEG,
+        },
     )
 
     # --- sim-to-real smoothing regularizers (copied verbatim from Catch env_cfg) ---

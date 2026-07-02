@@ -203,7 +203,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # HitTrack: stream the end-effector hit-tracking error + success rate to TensorBoard once per
     # iteration. The stock RSL-RL logger only writes Train/Loss/Episode scalars; HitTrack sums the
-    # tracking error (pos/vel magnitude + per-axis |Δ| at the hit instant) and successes into env-side
+    # tracking error (pos/vel magnitude + per-axis |Δ|, normal angle/dot at the hit instant) and
+    # successes into env-side
     # GLOBAL accumulators (see ``mdp.reference_commands``), which we drain here -- exactly once per
     # iteration, right after the runner's own ``log`` -- so each point is the mean over that
     # iteration's rollout window (``num_steps_per_env`` * ``num_envs`` env-steps). The drain returns
@@ -219,6 +220,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         _ht_axis_keys = (
             "pos_err_total", "pos_err_x", "pos_err_y", "pos_err_z",
             "vel_err_total", "vel_err_x", "vel_err_y", "vel_err_z",
+            "normal_err_deg", "normal_dot", "normal_align_score",
         )
         if hasattr(runner, "logger") and hasattr(runner.logger, "log"):
             _base_logger_log = runner.logger.log

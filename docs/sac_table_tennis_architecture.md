@@ -1009,8 +1009,8 @@ Initial tolerances should reflect the real predictor and control problem:
 | --- | ---: | --- |
 | `sigma_t` | `0.02-0.04 s` | Covers one or two 50 Hz policy steps. |
 | `sigma_p` | `0.02-0.04 m` | Comparable to the current KF-level hit-point error. |
-| `sigma_v` | `0.3-0.6 m/s` | Loose enough for early learning; tighten after reachable commands are stable. |
-| `sigma_n` | `10-15 deg` | Only needed if planner outputs blade normal. |
+| `sigma_v` | `0.4 m/s` | Retuned after lowering A1 PD gains; broad enough for resume at ~0.6 m/s error but sharper than the old `0.5`. |
+| `sigma_n` | `20 deg` | Angular Gaussian width for blade-normal tracking; tighten toward `10-15 deg` only after `normal_err_deg` is stable. |
 
 If strict "only at hit time" learning is too sparse, the first relaxation should
 still stay inside the same tracking objective: widen `sigma_t` or add a
@@ -1085,21 +1085,27 @@ A1-Pingpong-HitTrack
 
 ### Validation Metrics
 
-Primary TensorBoard cards should move from ball outcomes to reference tracking:
+Primary TensorBoard cards should move from ball outcomes to reference tracking. The current
+RSL-RL hook writes the per-hit execution metrics under `hittrack/`:
 
-- `episode/ref_pos_error_at_hit_mean`
-- `episode/ref_vel_error_at_hit_mean`
-- `episode/ref_normal_error_at_hit_mean` if orientation is active
-- `episode/hit_time_abs_error_mean`
-- `episode/reachable_reference_rate`
-- `episode/joint_limit_violation_rate`
-- `episode/effort_margin_mean`
-- `reward_terms/hit_ref_pos`
-- `reward_terms/hit_ref_vel`
-- `reward_terms/hit_ref_normal`
-- `reward_terms/action_rate`
-- `reward_terms/joint_acc`
-- `reward_terms/joint_jerk`
+- `hittrack/hit_count`
+- `hittrack/success_rate`
+- `hittrack/pos_err_total`
+- `hittrack/pos_err_x`, `hittrack/pos_err_y`, `hittrack/pos_err_z`
+- `hittrack/vel_err_total`
+- `hittrack/vel_err_x`, `hittrack/vel_err_y`, `hittrack/vel_err_z`
+- `hittrack/normal_err_deg`
+- `hittrack/normal_dot`
+- `hittrack/normal_align_score`
+
+The reward contribution cards are logged by RSL-RL as `Episode_Reward/` terms:
+
+- `Episode_Reward/hit_ref_pos`
+- `Episode_Reward/hit_ref_vel`
+- `Episode_Reward/hit_ref_normal`
+- `Episode_Reward/action_rate`
+- `Episode_Reward/joint_acc`
+- `Episode_Reward/joint_jerk`
 
 Deployment dry-run metrics should compare planner output and robot execution:
 

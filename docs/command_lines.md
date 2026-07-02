@@ -106,7 +106,7 @@ tensorboard --logdir logs/rsl_rl/a1_tabletennis_hittrack
 /workspace/isaaclab/isaaclab.sh -p scripts/rsl_rl/train.py --task A1-Pingpong-HitTrack \
     --headless \
     --num_envs 8192 \
-    --max_iterations 20000
+    --max_iterations 10000
 
 
 ## 日志持久化: 本地写 + 定期同步到 OSS

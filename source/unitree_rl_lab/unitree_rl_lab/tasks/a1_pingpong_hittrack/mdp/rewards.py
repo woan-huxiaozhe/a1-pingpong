@@ -33,8 +33,15 @@ def hit_ref_vel(env, racket_body_name: str, *, sigma_t: float, sigma_v: float, w
     return vel_term
 
 
-def hit_ref_normal(env, racket_body_name: str, *, sigma_t: float, w_normal: float = 1.0):
-    """Time-gated blade-normal alignment vs the noisy n_ref (weight carried by RewardTermCfg).
+def hit_ref_normal(
+    env,
+    racket_body_name: str,
+    *,
+    sigma_t: float,
+    sigma_normal_deg: float,
+    w_normal: float = 1.0,
+):
+    """Time-gated angular-Gaussian blade-normal alignment vs the noisy n_ref.
 
     The blade normal is otherwise an unconstrained DOF (there is no orientation term besides
     pos/vel), so it drifts to ~100 deg error at the hit instant. ``racket_normal`` is the FK
@@ -42,4 +49,11 @@ def hit_ref_normal(env, racket_body_name: str, *, sigma_t: float, w_normal: floa
     is irrelevant (no subtraction needed, unlike position).
     """
     n_racket = racket_normal(env, racket_body_name)
-    return normal_align_term(n_racket, env._ht_n_ref_noisy, env._ht_tau_true, sigma_t=sigma_t, w_normal=w_normal)
+    return normal_align_term(
+        n_racket,
+        env._ht_n_ref_noisy,
+        env._ht_tau_true,
+        sigma_t=sigma_t,
+        sigma_normal_deg=sigma_normal_deg,
+        w_normal=w_normal,
+    )

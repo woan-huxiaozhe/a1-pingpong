@@ -63,6 +63,8 @@ def ensure_ht_runtime_buffers(env):
     env._ht_acc_ve_sum = torch.zeros((), device=device)  # sum ||v_racket - v_ref_clean||
     env._ht_acc_pe_abs = torch.zeros(3, device=device)  # sum |Δp| per axis (x,y,z)
     env._ht_acc_ve_abs = torch.zeros(3, device=device)  # sum |Δv| per axis (x,y,z)
+    env._ht_acc_ne_deg_sum = torch.zeros((), device=device)  # sum angle(n_racket, n_ref_clean) [deg]
+    env._ht_acc_ne_dot_sum = torch.zeros((), device=device)  # sum dot(n_racket, n_ref_clean)
 
 
 def pop_hittrack_tracking_stats(env):
@@ -84,11 +86,15 @@ def pop_hittrack_tracking_stats(env):
         "success_rate": float(env._ht_acc_success.item()) * inv,
         "pos_err_total": float(env._ht_acc_pe_sum.item()) * inv,
         "vel_err_total": float(env._ht_acc_ve_sum.item()) * inv,
+        "normal_err_deg": float(env._ht_acc_ne_deg_sum.item()) * inv,
+        "normal_dot": float(env._ht_acc_ne_dot_sum.item()) * inv,
+        "normal_align_score": 0.5 * (1.0 + float(env._ht_acc_ne_dot_sum.item()) * inv),
         "pos_err_x": pe_abs[0], "pos_err_y": pe_abs[1], "pos_err_z": pe_abs[2],
         "vel_err_x": ve_abs[0], "vel_err_y": ve_abs[1], "vel_err_z": ve_abs[2],
     }
     for buf in (env._ht_acc_n, env._ht_acc_success, env._ht_acc_pe_sum,
-                env._ht_acc_ve_sum, env._ht_acc_pe_abs, env._ht_acc_ve_abs):
+                env._ht_acc_ve_sum, env._ht_acc_pe_abs, env._ht_acc_ve_abs,
+                env._ht_acc_ne_deg_sum, env._ht_acc_ne_dot_sum):
         buf.zero_()
     return stats
 
@@ -259,13 +265,17 @@ def update_hit_track_state(
     if bool(at_hit.any()):
         # Fetch the racket state lazily -- only needed at the hit step -- so the per-step cursor
         # advance stays Isaac-free (the deferred observations import pulls in isaaclab/USD).
+        from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import RACKET_BODY_NAME
+        from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import racket_normal
+
         if racket_pos is None or racket_vel is None:
-            from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import RACKET_BODY_NAME
             from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_state
 
             center, center_vel, _ = _racket_body_state(env, RACKET_BODY_NAME)
             racket_pos = center - env.scene.env_origins
             racket_vel = center_vel
+
+        racket_n = racket_normal(env, RACKET_BODY_NAME)
 
         pe = torch.norm(racket_pos - env._ht_p_ref_clean, dim=-1)
         ve = torch.norm(racket_vel - env._ht_v_ref_clean, dim=-1)
@@ -279,9 +289,13 @@ def update_hit_track_state(
         # loop). Per-axis errors are |Δ| against the clean reference; kept on-device (no host sync).
         dp = (racket_pos - env._ht_p_ref_clean)[at_hit]
         dv = (racket_vel - env._ht_v_ref_clean)[at_hit]
+        dot = (racket_n[at_hit] * env._ht_n_ref_clean[at_hit]).sum(dim=-1).clamp(-1.0, 1.0)
+        angle_deg = torch.rad2deg(torch.acos(dot))
         env._ht_acc_n += at_hit.sum()
         env._ht_acc_success += ok[at_hit].sum()
         env._ht_acc_pe_sum += pe[at_hit].sum()
         env._ht_acc_ve_sum += ve[at_hit].sum()
         env._ht_acc_pe_abs += dp.abs().sum(dim=0)
         env._ht_acc_ve_abs += dv.abs().sum(dim=0)
+        env._ht_acc_ne_deg_sum += angle_deg.sum()
+        env._ht_acc_ne_dot_sum += dot.sum()

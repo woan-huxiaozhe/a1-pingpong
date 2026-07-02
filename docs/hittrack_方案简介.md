@@ -41,12 +41,14 @@ HitTrack 把链路**切成两段**：
 `[p_ref, v_ref, n_ref, tau]`(10维)、FK 拍心位置/法向、拍心位置误差、上一步动作。
 **critic 额外特权观测**：关节速度、拍的速度/角速度/坐标轴、**clean 参考指令 + tau_true**、拍心速度误差。
 
-**奖励（核心两项 + 平滑正则）**：
+**奖励（核心三项 + 平滑正则）**：
 
-- `hit_ref_pos`（weight 20）、`hit_ref_vel`（weight 20）：时间门控高斯跟踪
+- `hit_ref_pos`（weight 20）、`hit_ref_vel`（weight 40）：时间门控高斯跟踪
   `gate = exp(-0.5 (tau_true/σ_t)²)`，`score = exp(-||e||² / 2σ²)`，
-  其中 `σ_t=0.03`、`σ_p=0.03`、`σ_v=0.3`。只有逼近击球时刻、误差才计入，
-  避免策略提前/事后"蹭分"。法向项暂关闭。
+  其中 `σ_t=0.03`、`σ_p=0.05`、`σ_v=0.4`。只有逼近击球时刻、误差才计入，
+  避免策略提前/事后"蹭分"。
+- `hit_ref_normal`（weight 12）：同样时间门控的拍面法向角度高斯，
+  `score = exp(-angle(n_racket,n_ref)^2 / 2σ_normal^2)`，当前 `σ_normal=20 deg`。
 - 平滑正则（从 Catch env_cfg 原样照搬）：`action_rate`、`joint_acc`、`joint_jerk`、
   `joint_limit_margin`、`joint_effort_margin` —— 服务 sim-to-real。
 
@@ -135,8 +137,9 @@ env 端测试 —— `isaaclab` 依赖 USD(`pxr`)，仅存在于 Isaac Sim 运�
 |---|---|---|
 | `MAX_PREP_S` / `POST_MARGIN_S` | 0.6 / 0.12 s | 准备时长 / 击球后余量 |
 | `STEP_DT` | 0.01 s | 100 Hz 控制步 |
-| `σ_t` / `σ_p` / `σ_v` | 0.03 / 0.03 / 0.3 | 时间门控 / 位置 / 速度高斯宽度 |
-| `W_POS` / `W_VEL` | 20 / 20 | 位置 / 速度奖励权重 |
+| `σ_t` / `σ_p` / `σ_v` | 0.03 / 0.05 / 0.4 | 时间门控 / 位置 / 速度高斯宽度 |
+| `σ_normal` | 20 deg | 拍面法向角度高斯宽度 |
+| `W_POS` / `W_VEL` / `W_NORMAL` | 20 / 40 / 12 | 位置 / 速度 / 拍面法向奖励权重 |
 | `SUCCESS_POS` / `SUCCESS_VEL` | 0.05 m / 0.2 m/s | 成功判据阈值 |
-| `REACH_Y` / `REACH_Z` | (−0.6,0.6) / (0.7,1.5) | 可达工作空间门 |
-| `action_scale` | 0.06 | 关节增量动作尺度（100 Hz） |
+| `REACH_Y` / `REACH_Z` | (−0.2,0.2) / (0.7,1.5) | 可达工作空间门 |
+| `action_scale` | 0.10 | 关节增量动作尺度（100 Hz） |

@@ -43,17 +43,12 @@ def normal_align_term(
     tau: torch.Tensor,
     *,
     sigma_t: float,
+    sigma_normal_deg: float,
     w_normal: float,
 ) -> torch.Tensor:
-    """Time-gated blade-normal alignment term [N].
-
-    ``n_racket`` and ``n_ref`` are (approximately) unit direction vectors, so alignment is their
-    dot product. Uses a cosine kernel ``0.5*(1+cos)`` rather than a narrow Gaussian on the angle:
-    at the current ~100 deg error a Gaussian gives ~0 gradient, whereas ``0.5*(1+cos)`` has a
-    near-maximal restoring gradient around 90-100 deg and degrades to a quadratic near alignment
-    (so it also fine-tunes). Gated identically to the pos/vel terms so orientation is only enforced
-    around the hit instant.
-    """
+    """Time-gated blade-normal alignment term [N] using a Gaussian over angular error."""
     gate = time_gate(tau, sigma_t)
     cos = (n_racket * n_ref).sum(dim=-1).clamp(-1.0, 1.0)
-    return w_normal * gate * 0.5 * (1.0 + cos)
+    angle = torch.acos(cos)
+    sigma = torch.as_tensor(sigma_normal_deg, dtype=angle.dtype, device=angle.device) * torch.pi / 180.0
+    return w_normal * gate * gaussian_score(angle, sigma)

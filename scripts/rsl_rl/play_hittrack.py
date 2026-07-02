@@ -391,6 +391,11 @@ def main():
         print(f"per-axis |Δ| over {stats['hit_count']} hits:")
         print(f"  pos_err  x={stats['pos_err_x']:.4f}  y={stats['pos_err_y']:.4f}  z={stats['pos_err_z']:.4f}  (m)")
         print(f"  vel_err  x={stats['vel_err_x']:.3f}  y={stats['vel_err_y']:.3f}  z={stats['vel_err_z']:.3f}  (m/s)")
+        if "normal_err_deg" in stats:
+            print(
+                f"  normal   angle={stats['normal_err_deg']:.2f} deg  "
+                f"dot={stats['normal_dot']:.3f}  score={stats['normal_align_score']:.3f}"
+            )
         print("  read: z big -> reach/height; x big -> arrive_time/timing; y big -> lateral centering")
     print("===========================================")
 
