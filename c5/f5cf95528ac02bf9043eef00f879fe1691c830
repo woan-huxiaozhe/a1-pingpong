@@ -1,0 +1,19 @@
+docs/tmux_quick_start.md
+  s_b291915ce4223a::t_b715ed6cb150d4 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "c5f5cf95528ac02bf9043eef00f879fe1691c830",
+  "prompts": {},
+  "sessions": {
+    "s_b291915ce4223a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1d8d-c3cc-74e2-828b-d17071d37749",
+        "model": "gpt-5.5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
