@@ -13,7 +13,7 @@ A1_USD_PATH = os.path.join(
 
 A1_ARM_STIFFNESS = {
     "joint_yb_1": 200.0, "joint_yb_2": 200.0, "joint_yb_3": 200.0,
-    "joint_yb_4": 60.0, "joint_yb_5": 60.0, "joint_yb_6": 60.0, "joint_yb_7": 60.0,
+    "joint_yb_4": 90.0, "joint_yb_5": 90.0, "joint_yb_6": 90.0, "joint_yb_7": 90.0,
 }
 A1_ARM_DAMPING = {
     "joint_yb_1": 5.0, "joint_yb_2": 5.0, "joint_yb_3": 5.0,

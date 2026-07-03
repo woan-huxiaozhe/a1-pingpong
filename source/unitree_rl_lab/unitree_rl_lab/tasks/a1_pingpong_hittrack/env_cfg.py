@@ -90,6 +90,11 @@ SIGMA_P = 0.05
 # setup once it starts closing the x-velocity gap.
 SIGMA_V = 0.4
 SIGMA_NORMAL_DEG = 20.0  # angular Gaussian width for blade-normal alignment at the hit instant
+# Narrower than SIGMA_T: the blade normal sweeps continuously through the swing (unlike pos/vel,
+# it is never "held"), so gating it over the same +/-2*SIGMA_T window as pos/vel demanded alignment
+# across a span wide enough for the racket to rotate ~20-30 deg, fighting swing speed. Keep pos/vel
+# timing untouched; only tighten the window the normal term actually pays out over.
+SIGMA_T_NORMAL = 0.015
 W_NORMAL = 12.0
 W_POS = 20.0
 W_VEL = 40.0
@@ -194,7 +199,7 @@ class RewardsCfg:
         weight=W_NORMAL,
         params={
             "racket_body_name": RACKET_BODY_NAME,
-            "sigma_t": SIGMA_T,
+            "sigma_t": SIGMA_T_NORMAL,
             "sigma_normal_deg": SIGMA_NORMAL_DEG,
         },
     )
