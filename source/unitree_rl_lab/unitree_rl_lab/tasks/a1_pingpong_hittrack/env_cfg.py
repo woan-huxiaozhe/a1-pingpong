@@ -49,12 +49,19 @@ RIGHT_ARM_JOINT_NAMES = [
 ]
 TABLE_Z = 0.76  # table surface height (m)
 OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0.5*(0+1.37), ROBOT_SIDE=-1
-ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE  # = -1.82; robot base placement
+# 0.45 -> 0.47: real mounting position isn't fixed yet (pre-deployment), so the extra standoff from
+# the hit plane is decided here in sim rather than via a joint-space retreat -- a pure base
+# translation is exact (no FK calibration error) and leaves READY_JOINT_POS (and the racket
+# orientation it encodes) untouched. New ready pose sat with the blade-center near/past
+# HIT_PLANE_X (no swing runway); this pushes the whole arm further back.
+ROBOT_BASE_X = (1.37 + 0.47) * ROBOT_SIDE  # = -1.84; robot base placement
 MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  # = [8,8,8,20,20,20,20]
 
 # --- Tuning carried over from the Catch SAC config, now OWNED (forked) by HitTrack. Changes to
 # the Catch ready pose / lift no longer propagate here. ---
-READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]
+# READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]  # old
+READY_JOINT_POS = [1.6, -0.7, 1.6, -1.7, 0.0, 0.6, -1.8]
+
 READY_LIFT_POS = -0.22
 
 # --- HitTrack constants (v1, 100 Hz) ---
@@ -73,7 +80,7 @@ HIT_RESTITUTION = 0.9
 # drives nothing (the bake script derives its own serve range from the real data + bake-time gates,
 # not from here). Kept as the synthetic fallback / ablation toggle.
 HITTRACK_BOX = {
-    "y": (-0.2, 0.3),
+    "y": (-0.15, 0.25),
     "z": (0.9, 1.25),
     "vx": (-4.5, -3.0),
     "vy": (-0.3, 0.3),
@@ -89,7 +96,12 @@ SIGMA_P = 0.05
 # still sees gradient at ~0.6 m/s error, but make the term more valuable than the old 20 * sigma=0.5
 # setup once it starts closing the x-velocity gap.
 SIGMA_V = 0.4
-SIGMA_NORMAL_DEG = 20.0  # angular Gaussian width for blade-normal alignment at the hit instant
+SIGMA_NORMAL_DEG = 15.0  # angular Gaussian width for blade-normal alignment at the hit instant
+# 20.0 -> 15.0: the time gate (SIGMA_T_NORMAL) was already narrowed once (0.03->0.015) yet normal
+# error stayed ~20deg/92% of hits >10deg, identical between success and failed hits (a systematic
+# tracking floor, not timing noise) -- narrowing the window further has little room left and mostly
+# adds sparsity. Sharpen the angular tolerance instead so the reward gradient pushes harder toward
+# small errors from wherever the policy's swing dynamics actually land.
 # Narrower than SIGMA_T: the blade normal sweeps continuously through the swing (unlike pos/vel,
 # it is never "held"), so gating it over the same +/-2*SIGMA_T window as pos/vel demanded alignment
 # across a span wide enough for the racket to rotate ~20-30 deg, fighting swing speed. Keep pos/vel
@@ -100,7 +112,10 @@ W_POS = 20.0
 W_VEL = 40.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.2, 0.2)
+REACH_Y = (-0.10, 0.30)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
+# draw each serve's y target uniformly from this range (mdp/reference_source.py), so it IS the
+# trained lateral serve range, not just a synthetic-curriculum box. Was symmetric about 0; recenter
+# on the new ready pose's resting blade-center y (~+0.10) so both reach directions are comparable.
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
@@ -205,7 +220,12 @@ class RewardsCfg:
     )
 
     # --- sim-to-real smoothing regularizers (copied verbatim from Catch env_cfg) ---
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
+    # -0.005 -> -0.0025: J1-3 already saturate raw action 74-79% of the time (bottlenecked by the
+    # max_joint_velocity rate cap, not this penalty) so they're unaffected; J4-6 saturate only
+    # 27-56% with torque occasionally at the 8N*m ceiling, i.e. there is some headroom the penalty
+    # may be suppressing. Halved rather than dropped further to keep most of the smoothness margin
+    # for sim-to-real transfer.
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0025)
     joint_acc = RewTerm(
         func=mdp.joint_acc_l2,
         weight=-5.0e-7,
