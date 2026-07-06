@@ -16,7 +16,14 @@ A1_ARM_STIFFNESS = {
     "joint_yb_4": 90.0, "joint_yb_5": 90.0, "joint_yb_6": 90.0, "joint_yb_7": 90.0,
 }
 A1_ARM_DAMPING = {
-    "joint_yb_1": 5.0, "joint_yb_2": 5.0, "joint_yb_3": 5.0,
+    # J1-3 5.0->3.5 (2026-07-04): the joint-delta action interface caps EE swing speed at ~K*scale/D;
+    # at the hit the proximal joints sat at 8-16% velocity / 33-41% torque util (model_10000) despite a
+    # saturated action, so lowering damping raises the velocity ceiling (and lowers holding torque)
+    # without touching the 28 N*m effort headroom. Conservative 30% cut; the real arm's D must match.
+    "joint_yb_1": 3.5, "joint_yb_2": 3.5, "joint_yb_3": 3.5,
+    # J4-7 kept small (0.5); the 2026-07-04 J4 big-motor preview (K/effort/D/vel -> J1-3 class) was
+    # reverted: doubling J4 torque did NOT decouple normal error from swing speed (it diverged earlier),
+    # so J4 torque is not the binding cause -- the lever is the reward balance, not the wrist motor.
     "joint_yb_4": 0.5, "joint_yb_5": 0.5, "joint_yb_6": 0.5, "joint_yb_7": 0.5,
 }
 A1_ARM_EFFORT = {

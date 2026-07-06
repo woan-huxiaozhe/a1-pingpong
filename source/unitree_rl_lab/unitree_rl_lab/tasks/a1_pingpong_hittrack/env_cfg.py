@@ -49,18 +49,19 @@ RIGHT_ARM_JOINT_NAMES = [
 ]
 TABLE_Z = 0.76  # table surface height (m)
 OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0.5*(0+1.37), ROBOT_SIDE=-1
-# 0.45 -> 0.47: real mounting position isn't fixed yet (pre-deployment), so the extra standoff from
-# the hit plane is decided here in sim rather than via a joint-space retreat -- a pure base
-# translation is exact (no FK calibration error) and leaves READY_JOINT_POS (and the racket
-# orientation it encodes) untouched. New ready pose sat with the blade-center near/past
-# HIT_PLANE_X (no swing runway); this pushes the whole arm further back.
-ROBOT_BASE_X = (1.37 + 0.47) * ROBOT_SIDE  # = -1.84; robot base placement
+# 0.45 standoff (reverted 2026-07-04 from the 0.47 back-move). model_10000 telemetry showed the
+# ready-pose blade already sits behind HIT_PLANE_X, so runway was never the swing-speed bottleneck
+# (the action interface is); the extra 2 cm only shortened far-+y lateral reach (perr_y up to 0.12 on
+# the +y serves) for no velocity gain. FK-verified at base=-1.82: ready blade center = (-1.486, +0.034,
+# +1.032) => 0.046 m BEHIND the plane (positive forward runway; not past it). Back to original standoff.
+ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE  # = -1.82; robot base placement
 MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  # = [8,8,8,20,20,20,20]
 
 # --- Tuning carried over from the Catch SAC config, now OWNED (forked) by HitTrack. Changes to
 # the Catch ready pose / lift no longer propagate here. ---
 # READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]  # old
-READY_JOINT_POS = [1.6, -0.7, 1.6, -1.7, 0.0, 0.6, -1.8]
+# READY_JOINT_POS = [1.6, -0.7, 1.6, -1.7, 0.0, 0.6, -1.8]
+READY_JOINT_POS = [1.640, -0.540, 1.616, -1.366, -0.102, 1.000, -1.869]  # ready position with slight pre tilting about y-axis (2026-07-04, model_10000 telemetry). The ready pose is a compromise between the
 
 READY_LIFT_POS = -0.22
 
@@ -95,8 +96,8 @@ SIGMA_P = 0.05
 # Velocity retune after lowering A1 PD gains: keep the Gaussian broad enough that the resumed policy
 # still sees gradient at ~0.6 m/s error, but make the term more valuable than the old 20 * sigma=0.5
 # setup once it starts closing the x-velocity gap.
-SIGMA_V = 0.4
-SIGMA_NORMAL_DEG = 15.0  # angular Gaussian width for blade-normal alignment at the hit instant
+SIGMA_V = 0.25
+SIGMA_NORMAL_DEG = 10.0  # angular Gaussian width for blade-normal alignment at the hit instant
 # 20.0 -> 15.0: the time gate (SIGMA_T_NORMAL) was already narrowed once (0.03->0.015) yet normal
 # error stayed ~20deg/92% of hits >10deg, identical between success and failed hits (a systematic
 # tracking floor, not timing noise) -- narrowing the window further has little room left and mostly
@@ -106,10 +107,16 @@ SIGMA_NORMAL_DEG = 15.0  # angular Gaussian width for blade-normal alignment at 
 # it is never "held"), so gating it over the same +/-2*SIGMA_T window as pos/vel demanded alignment
 # across a span wide enough for the racket to rotate ~20-30 deg, fighting swing speed. Keep pos/vel
 # timing untouched; only tighten the window the normal term actually pays out over.
-SIGMA_T_NORMAL = 0.015
-W_NORMAL = 12.0
-W_POS = 20.0
-W_VEL = 40.0
+SIGMA_T_NORMAL = 0.010
+# 12.0 -> 30.0 (2026-07-04): normal_err_deg does NOT converge -- it bottoms ~4-5deg early (step ~100,
+# while the swing is still slow) then DIVERGES back to ~19deg in lockstep with vel_err falling. The
+# policy is TRADING a square paddle for swing speed because W_VEL(40) >> W_NORMAL(12) and normal only
+# pays in a narrow +/-2-step gate. A J4 big-motor preview (torque 8->28) did NOT fix it (diverged
+# earlier) -> torque is not the binding cause; the reward balance is. Raise W_NORMAL toward W_POS(20)/
+# W_VEL(40) so holding loft is worth the swing-speed it costs. Isolated change (gate/sigma untouched).
+W_NORMAL = 30.0
+W_POS = 15.0
+W_VEL = 30.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
 REACH_Y = (-0.10, 0.30)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
@@ -136,9 +143,17 @@ class ActionsCfg:
         # 1) on the proximal joints while joint-vel utilization was only 16-36% and torque/limits were
         # slack -> the arm reached just ~56% of the commanded v_ref_x (verr_x~0.54). A zero-cost
         # inference sweep on model_1500 confirmed the direction: scale 0.06->0.10 lifted x-reach to
-        # ~72% and cut verr_x to ~0.33. Note J1-3 are still bounded by max_joint_velocity*step_dt=0.08
-        # (their 8 rad/s hw limit) via compute_joint_delta_target's rate cap; J4-7 get the full 0.10.
-        action_scale=0.10,
+        # ~72% and cut verr_x to ~0.33.
+        # 2026-07-04 (model_10000 telemetry, new ready pose): at the hit instant J1-3 use only
+        # 8-16% of their 8 rad/s velocity limit and 33-41% of their 28 N*m torque -- huge headroom on
+        # BOTH -- yet the raw action is clamped 57-83% of steps (J2 net output ~4.7). The throttle is
+        # NOT the rate cap and NOT the actuators: raw_target = q + action*scale re-anchors to the
+        # CURRENT q every step, so the commanded lead is permanently capped at action_scale and the
+        # PD steady velocity ceiling is ~K*scale/D (=200*0.10/5=4 rad/s, realized ~1.5 in the short
+        # swing). Lever = raise the lead on the joints WITH headroom. J1-3 -> 0.16 (paired with
+        # damping 5.0->3.5 in a1.py so K*scale/D~=9 > 8 rad/s hw, uncapping within the hw limit);
+        # J4-6 stay 0.10 (already torque-saturated at their 8 N*m ceiling, more scale just clips); J7 unused.
+        action_scale=[0.20, 0.20, 0.20, 0.10, 0.10, 0.10, 0.10],
         # 0.5 -> 0.7: `smoothing` is the EMA blend toward the raw target, so HIGHER = more responsive
         # (less lag), not smoother-slower. The same sweep showed smoothing 0.8 beat 0.5 on swing speed
         # (0.3 was worse); 0.7 pairs with the larger scale for a faster target ramp without going fully

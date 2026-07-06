@@ -68,8 +68,8 @@ logs/sac_table_tennis/sim_logs/A1-TableTennis-SAC-Catch__2026-06-17_20-33-03__ag
 # lives in HitTrackPPORunnerCfg). Logs to logs/rsl_rl/a1_tabletennis_hittrack/<timestamp>/.
 python scripts/rsl_rl/train.py --task A1-Pingpong-HitTrack \
     --headless \
-    --num_envs 2048 \
-    --max_iterations 20000 \
+    --num_envs 4096 \
+    --max_iterations 10000
 
 # play: prints per-episode tracking error + aggregate. Headless avoids the laptop-GPU Vulkan crash.
 # Omitting --checkpoint auto-picks the latest model_*.pt of the latest run. Recording is ON by
