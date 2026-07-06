@@ -74,9 +74,17 @@ parser.add_argument("--smoothing", type=float, default=None,
                          "is unchanged; only the action->joint-target mapping changes).")
 parser.add_argument("--action_scale", type=float, default=None,
                     help="Override the action-term action_scale at inference (same A/B purpose).")
+parser.add_argument("--video", action="store_true", default=False,
+                    help="Record an mp4 of the play (renders env 0; combine with --headless, cameras auto-enabled).")
+parser.add_argument("--video_length", type=int, default=400,
+                    help="Number of control steps to record into the video (400 @ 100 Hz ~ 4 s).")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+# recording video requires the offscreen render pipeline -> force-enable cameras (same as play.py)
+if args_cli.video:
+    args_cli.enable_cameras = True
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -230,7 +238,20 @@ def main():
     if args_cli.action_scale is not None:
         env_cfg.actions.right_arm.action_scale = args_cli.action_scale
         print(f"[PLAY] OVERRIDE action_scale -> {args_cli.action_scale}")
-    env = gym.make(args_cli.task, cfg=env_cfg)
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    if args_cli.video:
+        if args_cli.checkpoint:
+            video_dir = os.path.join(os.path.dirname(os.path.abspath(args_cli.checkpoint)), "videos", "play")
+        else:
+            video_dir = os.path.join("logs", "rsl_rl", "hittrack_play_videos")
+        env = gym.wrappers.RecordVideo(
+            env,
+            video_folder=video_dir,
+            step_trigger=lambda step: step == 0,   # one clip starting from the first step
+            video_length=args_cli.video_length,
+            disable_logger=True,
+        )
+        print(f"[PLAY] recording video -> {video_dir}  (length={args_cli.video_length} steps)")
     env = RslRlVecEnvWrapper(env)
     raw = env.unwrapped
     device = raw.device

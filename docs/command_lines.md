@@ -81,6 +81,11 @@ python scripts/rsl_rl/play_hittrack.py --task A1-Pingpong-HitTrack \
 #   (drop --headless and add --real-time to watch a window, GPU permitting)
 #   zero-action baseline (no ckpt): python scripts/rsl_rl/play_hittrack.py --zero_action --headless --episodes 1
 
+python scripts/rsl_rl/play_hittrack.py --task A1-Pingpong-HitTrack \
+    --checkpoint logs/rsl_rl/a1_tabletennis_hittrack/2026-07-06_10-50-34/model_9500.pt \
+    --num_envs 1 --episodes 20 \
+    --video --video_length 600 --headless
+
 # visualize a record CSV: fig1 = per-joint pos(target vs actual)/vel/torque; fig2 = end-effector
 # pos/vel/face-normal (actual vs target). No Isaac dep (numpy+matplotlib). With no path it reads the
 # newest record CSV under logs/; default backend Agg saves PNGs next to the CSV (--show for a window).

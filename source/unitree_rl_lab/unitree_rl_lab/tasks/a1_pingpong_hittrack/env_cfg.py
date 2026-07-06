@@ -340,5 +340,5 @@ class HitTrackPlayEnvCfg(HitTrackEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 1
-        self.viewer.eye = (-2.5, -2.0, 1.4)
+        self.viewer.eye = (-0.5, -1.4, 1.4)
         self.viewer.lookat = (-1.0, 0.0, 1.0)
