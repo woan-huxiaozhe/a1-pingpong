@@ -1,0 +1,33 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  h_c9d7340f891f95 63-64,99-100,110,117-119,156
+  s_fcf366ce5e17a6::t_e5ad57afee1408 111-116
+  s_fcf366ce5e17a6::t_96e4890f8de0a9 53-56
+  s_fcf366ce5e17a6::t_5a884acea02063 52,57
+  s_fcf366ce5e17a6::t_71711dbae64cf6 146-155
+source/unitree_rl_lab/unitree_rl_lab/assets/robots/a1.py
+  s_fcf366ce5e17a6::t_ce6911e2266aa6 19-23
+  s_fcf366ce5e17a6::t_5166da58f237f5 24-26
+docs/command_lines.md
+  h_c9d7340f891f95 71-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "98d4bdc976e66b33fe270c7dc98f0b92c10b2c40",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_fcf366ce5e17a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e92897d0-3dd7-4aa4-a5fe-5bf499b42407",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
