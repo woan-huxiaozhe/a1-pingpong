@@ -1,0 +1,25 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack_forehand/env_cfg.py
+  s_fad4f100ee8973::t_27138fa7108f4e 131-136
+  h_c9d7340f891f95 72-73,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8c78931e0059ae97ab6b385a5c74e05ee6162eea",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_fad4f100ee8973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "25e97b60-eb2c-41bb-800a-e50a7a01be06",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
