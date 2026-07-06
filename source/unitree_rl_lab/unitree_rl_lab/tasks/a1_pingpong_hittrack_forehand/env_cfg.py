@@ -52,13 +52,12 @@ RIGHT_ARM_JOINT_NAMES = [
 ]
 TABLE_Z = 0.76  # table surface height (m)
 OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0.5*(0+1.37), ROBOT_SIDE=-1
-# 0.45 standoff (reverted 2026-07-04 from the 0.47 back-move). model_10000 telemetry showed the
-# ready-pose blade already sits behind HIT_PLANE_X, so runway was never the swing-speed bottleneck
-# (the action interface is); the extra 2 cm only shortened far-+y lateral reach (perr_y up to 0.12 on
-# the +y serves) for no velocity gain. FK-verified at base=-1.82: ready blade center = (-1.486, +0.034,
-# +1.032) => 0.046 m BEHIND the plane (positive forward runway; not past it). Back to original standoff.
-ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE  # = -1.82; robot base placement
-ROBOT_BASE_Y = 0.0  # forehand lateral base offset (tunable; 0.0 = same as backhand). Paired with the
+# Forehand standoff 0.20 (base = -1.57): moved +0.25 m toward the opponent vs the inherited backhand
+# 0.45 (-1.82). FK-verified 2026-07-06 at the forehand ready pose (joint7 flipped): ready blade center
+# = (-1.544, -0.058, +1.003) => 0.104 m BEHIND HIT_PLANE_X (-1.44), i.e. positive forward runway
+# (tighter than the same pose's 0.354 m at -1.82, but still behind the plane). Trainable in a smoke run.
+ROBOT_BASE_X = (1.37 + 0.20) * ROBOT_SIDE  # = -1.57; robot base placement
+ROBOT_BASE_Y = 0.8  # forehand lateral base offset (tunable; 0.0 = same as backhand). Paired with the
 # forehand ready pose; adjust together with READY_JOINT_POS if FK shows the blade off-center laterally.
 MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  # = [8,8,8,20,20,20,20]
 
@@ -66,10 +65,11 @@ MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  
 # the Catch ready pose / lift no longer propagate here. ---
 # READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]  # old
 # READY_JOINT_POS = [1.6, -0.7, 1.6, -1.7, 0.0, 0.6, -1.8]
-# Forehand ready pose (user viewer-tuned, 2026-07-06). Replaces the backhand ready pose. joint_yb_1..7;
-# joint7=0 (J7 unused per action-scale comment). This is the dominant lever steering the IK into the
-# FOREHAND basin so the big proximal motors (J1/J2) drive swing speed while the wrist only holds loft.
-READY_JOINT_POS = [-0.251, -0.964, 1.32, 0.979, -1.27, 0.471, 0.0]
+# Forehand ready pose (user viewer-tuned, 2026-07-06). Replaces the backhand ready pose. joint_yb_1..7.
+# joint7=-1.57 rolls the wrist ~180 deg so the paddle's local +Y face points toward the opponent (+X):
+# FK rn.nref -0.89 -> +0.95 (the signed-cosine normal reward needs the +Y face forward, not backward).
+# The proximal J1/J2 drive swing speed while the wrist holds loft (the forehand decoupling hypothesis).
+READY_JOINT_POS = [-0.251, -0.964, 1.32, 0.979, -1.27, 0.471, -1.57]
 
 READY_LIFT_POS = -0.22
 
@@ -89,7 +89,7 @@ HIT_RESTITUTION = 0.9
 # drives nothing (the bake script derives its own serve range from the real data + bake-time gates,
 # not from here). Kept as the synthetic fallback / ablation toggle.
 HITTRACK_BOX = {
-    "y": (-0.15, 0.25),
+    "y": (-0.15, 0.05),
     "z": (0.9, 1.25),
     "vx": (-4.5, -3.0),
     "vy": (-0.3, 0.3),
@@ -354,5 +354,5 @@ class ForehandHitTrackPlayEnvCfg(ForehandHitTrackEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 1
-        self.viewer.eye = (-2.5, -2.0, 1.4)
+        self.viewer.eye = (-0.5, -2.4, 1.4)  # closer play/record framing (synced from hitter@4da9e2b)
         self.viewer.lookat = (-1.0, 0.0, 1.0)
