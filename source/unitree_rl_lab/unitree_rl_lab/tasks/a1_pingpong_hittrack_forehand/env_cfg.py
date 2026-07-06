@@ -69,7 +69,8 @@ MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  
 # joint7=-1.57 rolls the wrist ~180 deg so the paddle's local +Y face points toward the opponent (+X):
 # FK rn.nref -0.89 -> +0.95 (the signed-cosine normal reward needs the +Y face forward, not backward).
 # The proximal J1/J2 drive swing speed while the wrist holds loft (the forehand decoupling hypothesis).
-READY_JOINT_POS = [-0.251, -0.964, 1.32, 0.979, -1.27, 0.471, -1.57]
+READY_JOINT_POS = [-0.25, -0.96, 1.32, 0.98, -1.27, 0.47, -1.57]
+# READY_JOINT_POS = [0.69, -0.81, 0.28, 0.979, -1.52, 0.47, -1.57]
 
 READY_LIFT_POS = -0.22
 
@@ -123,14 +124,16 @@ SIGMA_T_NORMAL = 0.010
 # earlier) -> torque is not the binding cause; the reward balance is. Raise W_NORMAL toward W_POS(20)/
 # W_VEL(40) so holding loft is worth the swing-speed it costs. Isolated change (gate/sigma untouched).
 W_NORMAL = 30.0
-W_POS = 15.0
+W_POS = 25.0
 W_VEL = 30.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.10, 0.30)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
-# draw each serve's y target uniformly from this range (mdp/reference_source.py), so it IS the
-# trained lateral serve range, not just a synthetic-curriculum box. Was symmetric about 0; recenter
-# on the new ready pose's resting blade-center y (~+0.10) so both reach directions are comparable.
+REACH_Y = (-0.20, 0.10)  # baked-mode reset draws each serve's y target uniformly from this range minus
+# a 0.05 margin each end via sample_lateral_shift() (mdp/reference_source.py), so it IS the trained
+# lateral serve range -- HITTRACK_BOX["y"] is INERT under baked mode. History: -0.2,0.2 -> -0.10,0.30
+# -> -0.20,0.10. The -0.10,0.30 range put targets at U(-0.05,+0.25) (mean +0.10), offset ~+0.16 from the
+# FK ready blade-center y (-0.058); -0.20,0.10 gives U(-0.15,+0.05) (mean -0.05) centered on the blade so
+# both reach directions match (also realizes the lateral intent of the earlier, baked-inert HITTRACK_BOX).
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
