@@ -1,0 +1,26 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/serve_gen/generate_serves.py
+  s_6920083da50746::t_da555b857141a0 116-119,122-132
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/serve_gen/serve_state_dist.py
+  s_6920083da50746::t_ffa4e0a8ba8fe5 61,64-65,69-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "20af164de0d29fba73aa23d27939dd14e966905c",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_6920083da50746": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bf8bdea-1cc1-49ba-bba0-b33eb5995f67",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
