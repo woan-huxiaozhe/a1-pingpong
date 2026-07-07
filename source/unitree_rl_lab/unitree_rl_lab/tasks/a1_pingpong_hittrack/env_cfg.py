@@ -61,7 +61,22 @@ MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  
 # the Catch ready pose / lift no longer propagate here. ---
 # READY_JOINT_POS = [1.13, -0.39, 1.80, -1.4, 0.0, 0.8, -1.845288]  # old
 # READY_JOINT_POS = [1.6, -0.7, 1.6, -1.7, 0.0, 0.6, -1.8]
-READY_JOINT_POS = [1.640, -0.540, 1.616, -1.366, -0.102, 1.000, -1.869]  # ready position with slight pre tilting about y-axis (2026-07-04, model_10000 telemetry). The ready pose is a compromise between the
+# 2026-07-06 (model_9500 telemetry): re-optimized as a WIND-UP + normal PRE-TILT pose. model_9500
+# play showed success gated purely by velocity (pos 100% pass, perr 0.019; verr median 0.192 just at
+# the 0.2 gate) and the x-speed deficit is a TIMING problem: peak |ee_vx| reaches ~94% of v_ref but
+# lands ~54 ms AFTER the hit (at tau=0 only 87%). Cause = torque-limited ramp still rising at contact;
+# with 28/8 N*m now HW-matched (peak torque), the fix is more acceleration RUNWAY, not more torque.
+# Solved from a CSV-fit FK Jacobian at ready (pos+normal, R2>=0.99, env frame), damped-LS small Δq,
+# validated to ~1cm/2.4deg against the nearest real sim poses:
+#   * WIND-UP: J4 pre-cocked -1.366 -> -1.738 (+0.37 rad more +x swing range); blade retreats ~2.4cm
+#     so the runway to HIT_PLANE grows 5.7 -> 8.1 cm -> the torque-limited swing can reach v_ref BY
+#     tau=0 without leaning on the peak-torque ceiling. y/z held (Δ<=1.6cm), base stays -1.82 (retreat
+#     via pose, NOT a base-move -- avoids the 0.47 back-move's far-+y lateral-reach loss).
+#   * PRE-TILT: ready blade normal pre-tilted toward the MEAN hit normal (0.937,-0.055,0.344); the
+#     ready->hit sweep the wrist must do drops 21.1 -> ~10 deg (per-serve residual floor ~7.5deg), so
+#     the torque-saturated (88-92%) wrist is freed to HOLD loft -> should shrink the normal-err tail.
+# Requires a FRESH retrain (not a resume: ready pose changed substantially, max|Δq|=0.37).
+READY_JOINT_POS = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.094]
 
 READY_LIFT_POS = -0.22
 
@@ -107,19 +122,60 @@ SIGMA_NORMAL_DEG = 10.0  # angular Gaussian width for blade-normal alignment at 
 # it is never "held"), so gating it over the same +/-2*SIGMA_T window as pos/vel demanded alignment
 # across a span wide enough for the racket to rotate ~20-30 deg, fighting swing speed. Keep pos/vel
 # timing untouched; only tighten the window the normal term actually pays out over.
-SIGMA_T_NORMAL = 0.010
+# 0.005 -> 0.015 (2026-07-07): the narrowing above was RIGHT before the pre-tilt ready pose but is
+# wrong after it. What the policy optimizes is the *integrated* gated reward W * sum_step gate(tau);
+# sigma_t sets how many steps that covers (0.005 ~= 1.3 steps, 0.015 ~= 3.75, SIGMA_T=0.03 ~= 7.5).
+# So velocity integrates to W_VEL(30)*7.5 = 225 while normal at W_NORMAL(60)*1.3 = 76 -- velocity
+# out-weights normal ~3:1 in return, and the policy rationally trades a square blade for swing speed
+# (the ~20deg floor seen across ALL runs). The prior 30/0.010 -> 60/0.005 bump was a WASH (75 -> 76
+# integrated) that only made the term spikier -> normal_err went 13.9 -> 21 over 600 steps (07-07 run).
+# Widen instead: 60*3.75 = 225 integrated, matching velocity. Now feasible because the wind-up pose
+# cut the ready->hit sweep to ~10deg, so "arrive square early and HOLD through contact" is reachable
+# over a +/-2*sigma window (unlike the old 20-30deg sweep the narrowing was fighting). No parking
+# pathology: a square blade does not conflict with swinging through (unlike the static p_ref that
+# needed the tau<0 gate close). W_NORMAL kept at 60. Isolated change (weight/sigma_normal untouched).
+SIGMA_T_NORMAL = 0.015
+# Blade-face *turn-rate* Gaussian width (rad/s), for the still-face term (mdp.hit_ref_normal_rate).
+# 1.0 rad/s ~= 57 deg/s: the knee sits exactly at the traditional controller's demonstrated cruise
+# face-turn rate (~58 deg/s). Measured RL play (model_5500) tumbles the face at ~189 deg/s (~3.3 rad/s)
+# at contact -> scores exp(-0.5*3.3^2) ~= 0.004 (heavily pressured); <=1 rad/s is nearly free. The
+# term forces swing speed to be sourced from the proximal sweep (steady face) rather than a wrist
+# snap (which tumbles the face -- the root of the ~20deg normal floor at peak speed). See rewards.py.
+SIGMA_FACE_RATE = 1.0
 # 12.0 -> 30.0 (2026-07-04): normal_err_deg does NOT converge -- it bottoms ~4-5deg early (step ~100,
 # while the swing is still slow) then DIVERGES back to ~19deg in lockstep with vel_err falling. The
 # policy is TRADING a square paddle for swing speed because W_VEL(40) >> W_NORMAL(12) and normal only
 # pays in a narrow +/-2-step gate. A J4 big-motor preview (torque 8->28) did NOT fix it (diverged
 # earlier) -> torque is not the binding cause; the reward balance is. Raise W_NORMAL toward W_POS(20)/
 # W_VEL(40) so holding loft is worth the swing-speed it costs. Isolated change (gate/sigma untouched).
-W_NORMAL = 30.0
+# 60.0 -> 40.0 (2026-07-07): the SIGMA_T_NORMAL 0.005->0.015 widening (Plan 1) OVER-corrected. It put
+# normal's integrated capacity at 60*3.75 = 225, exactly tying W_VEL(30)*7.5 = 225 -- and with the
+# pre-tilt pose making a square blade cheap, normal then WON the trade: over the resumed run normal_err
+# fell 21->5deg but vel_err_total rose 0.12->0.32 and pos_err 0.022->0.044, while Ep-reward:normal
+# gained +1.52 vs only -0.86 lost on vel+pos, so the policy kept paying speed for an over-square blade
+# (vel_err still climbing, not converged). 5deg is past "square enough"; the marginal 10->5deg gain
+# (gaussian score 0.607->0.882 over sigma=10) is what cannibalizes velocity. Pull normal capacity to
+# 40*3.75 = 150 (~2x the old 75, not 3x): log-fit of capacity->err (75->13.5deg, 225->5deg) predicts
+# ~8deg here -- keeps normal well under the old 13.5deg floor while freeing vel/pos to recover. Keep
+# the wide gate (0.015): rewarding a square blade across the follow-through is stable; only the pull
+# magnitude was wrong. If normal creeps back >12deg, nudge to 45; if vel still high, drop to 35.
+# 40.0 -> 60.0 (2026-07-07, REVERTED): the 40 experiment above is deferred, not run. The new
+# still-face term (hit_ref_normal_rate) attacks the normal_err floor at its ROOT (the wrist-snap
+# tumble) rather than by trading weight against velocity, so we isolate it: restore W_NORMAL to the
+# Plan-1 alignment weight (60) and add the still-face term as the SOLE new change. Re-evaluate the
+# 60-vs-40 alignment weight only after the still-face run shows where normal/vel/pos land.
+W_NORMAL = 60.0
 W_POS = 15.0
 W_VEL = 30.0
+# Still-face term weight. Integrated capacity ~= W_NORMAL_RATE * sum_step gate(SIGMA_T_NORMAL) ~=
+# 20 * 3.75 = 75 -- a real push but below the alignment term (60*3.75=225), since this is a helper
+# that reshapes HOW speed is sourced, not the primary orientation driver. Single knob to tune next:
+# watch verr (must stay <=0.2 -- if it regresses, the policy is escaping by slowing the wrist, lower
+# W_NORMAL_RATE) and the new normal_rate_at_hit stat (target ~1 rad/s, down from ~3.3).
+W_NORMAL_RATE = 20.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.10, 0.30)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
+REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
 # draw each serve's y target uniformly from this range (mdp/reference_source.py), so it IS the
 # trained lateral serve range, not just a synthetic-curriculum box. Was symmetric about 0; recenter
 # on the new ready pose's resting blade-center y (~+0.10) so both reach directions are comparable.
@@ -231,6 +287,19 @@ class RewardsCfg:
             "racket_body_name": RACKET_BODY_NAME,
             "sigma_t": SIGMA_T_NORMAL,
             "sigma_normal_deg": SIGMA_NORMAL_DEG,
+        },
+    )
+    # still-face at the hit instant: reward low blade-face turn rate |dn/dt|=|omega x n|, gated at
+    # tau=0 like the others. hit_ref_normal sets WHERE the face points; this stops it TUMBLING as it
+    # arrives (RL play tumbles ~189 deg/s vs traditional ~58), forcing speed to be sourced proximally
+    # instead of via a wrist snap -> orientation improves without spending swing speed.
+    hit_ref_normal_rate = RewTerm(
+        func=mdp.hit_ref_normal_rate,
+        weight=W_NORMAL_RATE,
+        params={
+            "racket_body_name": RACKET_BODY_NAME,
+            "sigma_t": SIGMA_T_NORMAL,
+            "sigma_rate": SIGMA_FACE_RATE,
         },
     )
 

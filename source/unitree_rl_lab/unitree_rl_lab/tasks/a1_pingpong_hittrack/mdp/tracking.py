@@ -52,3 +52,27 @@ def normal_align_term(
     angle = torch.acos(cos)
     sigma = torch.as_tensor(sigma_normal_deg, dtype=angle.dtype, device=angle.device) * torch.pi / 180.0
     return w_normal * gate * gaussian_score(angle, sigma)
+
+
+def face_still_term(
+    n_racket: torch.Tensor,
+    ang_vel: torch.Tensor,
+    tau: torch.Tensor,
+    *,
+    sigma_t: float,
+    sigma_rate: float,
+    w: float,
+) -> torch.Tensor:
+    """Time-gated reward [N] for a *still* blade face at the hit instant.
+
+    ``normal_align_term`` rewards WHERE the face points; this rewards that it is not TUMBLING when
+    it gets there. The face-normal turn rate is ``|dn/dt| = |omega x n|`` (rad/s): only omega
+    perpendicular to ``n`` tilts the face, so paddle spin *about* its own normal is correctly ignored.
+    A Gaussian over that rate makes a steady face (low ``|omega x n|``) the reward-maximising way to
+    arrive -- which forces the swing speed to be sourced from the proximal joints (steady-face,
+    like the traditional cruise at ~1 rad/s) instead of a distal wrist snap (which tumbles the face
+    at ~3 rad/s and is why normal_err spikes exactly at peak speed). Same tau-gate as the other
+    hit terms (does NOT move the gate)."""
+    gate = time_gate(tau, sigma_t)
+    face_rate = torch.norm(torch.cross(ang_vel, n_racket, dim=-1), dim=-1)
+    return w * gate * gaussian_score(face_rate, sigma_rate)

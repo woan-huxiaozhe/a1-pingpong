@@ -8,9 +8,13 @@ Used only by the A1-Pingpong-HitTrack task.
 
 from __future__ import annotations
 
-from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import _racket_body_state, racket_normal
+from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import (
+    _racket_body_state,
+    racket_ang_vel,
+    racket_normal,
+)
 
-from .tracking import hit_track_terms, normal_align_term
+from .tracking import face_still_term, hit_track_terms, normal_align_term
 
 
 def hit_ref_pos(env, racket_body_name: str, *, sigma_t: float, sigma_p: float, w_pos: float = 1.0):
@@ -56,4 +60,28 @@ def hit_ref_normal(
         sigma_t=sigma_t,
         sigma_normal_deg=sigma_normal_deg,
         w_normal=w_normal,
+    )
+
+
+def hit_ref_normal_rate(
+    env,
+    racket_body_name: str,
+    *,
+    sigma_t: float,
+    sigma_rate: float,
+    w: float = 1.0,
+):
+    """Time-gated reward for a *steady* blade face at the hit instant (low ``|dn/dt| = |omega x n|``).
+
+    Complements ``hit_ref_normal`` (which sets WHERE the face points): this penalises the face
+    tumbling as it arrives. Measured RL play shows the face turning ~189 deg/s at contact (vs the
+    traditional controller's ~58 deg/s) because the final swing speed is sourced from a distal wrist
+    snap; that snap is the same wrist DOF that carries the normal, so normal_err spikes exactly at
+    peak speed. Rewarding a still face pushes the policy to source speed proximally and hold the
+    blade -- the traditional cruise pattern -- so orientation improves without paying swing speed.
+    """
+    n = racket_normal(env, racket_body_name)
+    w_ang = racket_ang_vel(env, racket_body_name)
+    return face_still_term(
+        n, w_ang, env._ht_tau_true, sigma_t=sigma_t, sigma_rate=sigma_rate, w=w
     )
