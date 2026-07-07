@@ -1,0 +1,50 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  h_c9d7340f891f95 178
+  s_d524deffaa6ba1::t_d92b4419b59afa 292-304
+  s_d524deffaa6ba1::t_7fda1210c6470f 125-137
+  s_d524deffaa6ba1::t_2055801baafe6d 151-161
+  s_4ea8bf39630ea6::t_7fff95bb4238cf 64-79
+  s_d524deffaa6ba1::t_973c927101f488 162-167,170-175
+  s_d524deffaa6ba1::t_e40f39ef030692 138-144
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/reference_commands.py
+  s_d524deffaa6ba1::t_d8874bc95b2d99 271
+  s_d524deffaa6ba1::t_eb8ae2c4b0de1f 99
+  s_d524deffaa6ba1::t_64990f83fcd7be 93
+  s_d524deffaa6ba1::t_864ee6eb33cf71 281-282
+  s_d524deffaa6ba1::t_bca6f773f5e933 306
+  s_d524deffaa6ba1::t_a634558a650363 68
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/rewards.py
+  s_d524deffaa6ba1::t_f48f8733572793 11-15,17
+  s_d524deffaa6ba1::t_a0fb5b19a3c6b2 64-87
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/tracking.py
+  s_d524deffaa6ba1::t_4902242a22e39c 55-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "39c56301248686cbf031042c3eaecd3b17664217",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_4ea8bf39630ea6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c80949e6-40c5-4f23-ac9b-0b4bd8d0565d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_d524deffaa6ba1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab5e0048-7e97-4771-bc54-d52f6df7232a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
