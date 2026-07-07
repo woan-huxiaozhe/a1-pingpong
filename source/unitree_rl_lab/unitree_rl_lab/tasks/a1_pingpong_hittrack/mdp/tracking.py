@@ -57,22 +57,34 @@ def normal_align_term(
 def face_still_term(
     n_racket: torch.Tensor,
     ang_vel: torch.Tensor,
+    v_racket: torch.Tensor,
+    v_ref: torch.Tensor,
     tau: torch.Tensor,
     *,
     sigma_t: float,
     sigma_rate: float,
+    sigma_v: float,
     w: float,
 ) -> torch.Tensor:
-    """Time-gated reward [N] for a *still* blade face at the hit instant.
+    """Time-gated reward [N] for a *still* blade face while actually swinging through the hit.
 
     ``normal_align_term`` rewards WHERE the face points; this rewards that it is not TUMBLING when
     it gets there. The face-normal turn rate is ``|dn/dt| = |omega x n|`` (rad/s): only omega
     perpendicular to ``n`` tilts the face, so paddle spin *about* its own normal is correctly ignored.
-    A Gaussian over that rate makes a steady face (low ``|omega x n|``) the reward-maximising way to
-    arrive -- which forces the swing speed to be sourced from the proximal joints (steady-face,
-    like the traditional cruise at ~1 rad/s) instead of a distal wrist snap (which tumbles the face
-    at ~3 rad/s and is why normal_err spikes exactly at peak speed). Same tau-gate as the other
-    hit terms (does NOT move the gate)."""
+
+    **Speed coupling (the fix that matters):** the raw face-still Gaussian is trivially maximised by
+    NOT MOVING -- ``|omega x n| -> 0`` when the whole arm decelerates -- so on its own it hands the
+    degenerate "arrive slow with a perfect still face" solution a free bonus (observed: run
+    2026-07-07 collapsed to verr~1.16 with normal 2deg and near-full still-face reward). We multiply
+    the face-still score by the SAME velocity-matching Gaussian ``exp(-verr^2/2 sigma_v^2)`` that the
+    velocity term uses, so a still face pays ONLY to the extent the paddle is also swinging at v_ref.
+    "Still because stopped" -> speed_gate ~= 0 -> zero reward; "still because proximal-sourced while
+    swinging fast" (the traditional cruise) -> speed_gate ~= 1 -> full reward. This makes a steady,
+    proximally-driven sweep the reward-maximising way to arrive instead of a distal wrist snap (which
+    tumbles the face at ~3 rad/s and is why normal_err spikes exactly at peak speed). Same tau-gate
+    as the other hit terms (does NOT move the gate)."""
     gate = time_gate(tau, sigma_t)
     face_rate = torch.norm(torch.cross(ang_vel, n_racket, dim=-1), dim=-1)
-    return w * gate * gaussian_score(face_rate, sigma_rate)
+    vel_err = torch.norm(v_racket - v_ref, dim=-1)
+    speed_gate = gaussian_score(vel_err, sigma_v)  # no still-face credit unless swinging at v_ref
+    return w * gate * gaussian_score(face_rate, sigma_rate) * speed_gate

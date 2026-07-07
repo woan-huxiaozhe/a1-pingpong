@@ -169,9 +169,14 @@ W_POS = 15.0
 W_VEL = 30.0
 # Still-face term weight. Integrated capacity ~= W_NORMAL_RATE * sum_step gate(SIGMA_T_NORMAL) ~=
 # 20 * 3.75 = 75 -- a real push but below the alignment term (60*3.75=225), since this is a helper
-# that reshapes HOW speed is sourced, not the primary orientation driver. Single knob to tune next:
-# watch verr (must stay <=0.2 -- if it regresses, the policy is escaping by slowing the wrist, lower
-# W_NORMAL_RATE) and the new normal_rate_at_hit stat (target ~1 rad/s, down from ~3.3).
+# that reshapes HOW speed is sourced, not the primary orientation driver. The kernel now multiplies
+# the still-face score by the velocity-matching Gaussian, so the old "escape by slowing the wrist"
+# route (2026-07-07_10-30-18 collapsed to verr~1.16) is structurally CLOSED: a slow wrist zeroes the
+# bonus. This term therefore only refines a face that is ALREADY swinging fast, so it is best paired
+# with a RESUME from a velocity-solved checkpoint (2026-07-06_20-50-11 model_5500) rather than
+# from-scratch (from cold init the policy still finds the wrist-snap corner first; coupling stops the
+# slow-collapse but does not by itself create the narrow fast+square basin -- the resume does). Watch
+# normal_rate_at_hit (target ~1 rad/s, down from ~3.3) AND that verr stays <=0.2.
 W_NORMAL_RATE = 20.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
@@ -182,11 +187,14 @@ REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
-# Curriculum (3): baked real-serve source. Off by default (curriculum (1)/(2) train on the
-# synthetic box). When on, the reset loads `HITTRACK_BAKED_PATH` (produced by
-# bake_hittrack_references.py) and samples a recorded serve per env instead of sampling the box.
+# Curriculum (3): baked serve source (ON by default; the curriculum (1)/(2) synthetic box is unused
+# while this is True). The reset loads `HITTRACK_BAKED_PATH` (a bake_hittrack_references.py npz) and
+# samples one recorded serve per env. Default = KDE-synthetic TRAIN set (933 serves densified from 50
+# real anchors, held out 16). To VALIDATE generalization, point this at
+# "hittrack_references_eval_real.npz" (the 15 held-out real serves) and measure hit success;
+# "hittrack_references.npz" is the original 72 real serves.
 HITTRACK_USE_BAKED = True
-HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references.npz")
+HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
 
 
 @configclass
@@ -290,9 +298,14 @@ class RewardsCfg:
         },
     )
     # still-face at the hit instant: reward low blade-face turn rate |dn/dt|=|omega x n|, gated at
-    # tau=0 like the others. hit_ref_normal sets WHERE the face points; this stops it TUMBLING as it
-    # arrives (RL play tumbles ~189 deg/s vs traditional ~58), forcing speed to be sourced proximally
-    # instead of via a wrist snap -> orientation improves without spending swing speed.
+    # tau=0 like the others AND multiplied (inside the kernel) by the velocity-matching Gaussian
+    # (sigma_v=SIGMA_V, same v_ref as hit_ref_vel). hit_ref_normal sets WHERE the face points; this
+    # stops it TUMBLING as it arrives (RL play tumbles ~189 deg/s vs traditional ~58), forcing speed
+    # to be sourced proximally instead of via a wrist snap. The speed coupling is the key fix: without
+    # it the raw still-face Gaussian is maximised by NOT MOVING, so run 2026-07-07_10-30-18 collapsed
+    # to the degenerate "arrive slow, perfect still face" solution (normal 2deg, verr~1.16, success 0).
+    # Coupling zeroes the still-face bonus unless the paddle is also swinging at v_ref -> a steady,
+    # proximally-driven sweep becomes the reward-max way to arrive, not a snap or a stop.
     hit_ref_normal_rate = RewTerm(
         func=mdp.hit_ref_normal_rate,
         weight=W_NORMAL_RATE,
@@ -300,6 +313,7 @@ class RewardsCfg:
             "racket_body_name": RACKET_BODY_NAME,
             "sigma_t": SIGMA_T_NORMAL,
             "sigma_rate": SIGMA_FACE_RATE,
+            "sigma_v": SIGMA_V,
         },
     )
 

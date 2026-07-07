@@ -69,9 +69,10 @@ def hit_ref_normal_rate(
     *,
     sigma_t: float,
     sigma_rate: float,
+    sigma_v: float,
     w: float = 1.0,
 ):
-    """Time-gated reward for a *steady* blade face at the hit instant (low ``|dn/dt| = |omega x n|``).
+    """Time-gated reward for a *steady* blade face while swinging through (low ``|dn/dt|``, coupled to speed).
 
     Complements ``hit_ref_normal`` (which sets WHERE the face points): this penalises the face
     tumbling as it arrives. Measured RL play shows the face turning ~189 deg/s at contact (vs the
@@ -79,9 +80,15 @@ def hit_ref_normal_rate(
     snap; that snap is the same wrist DOF that carries the normal, so normal_err spikes exactly at
     peak speed. Rewarding a still face pushes the policy to source speed proximally and hold the
     blade -- the traditional cruise pattern -- so orientation improves without paying swing speed.
+
+    The face-still score is multiplied INSIDE the kernel by the velocity-matching Gaussian (same
+    ``sigma_v`` and noisy ``v_ref`` as ``hit_ref_vel``), so "still because the arm stopped" earns
+    nothing -- only a still face reached *while swinging at v_ref* is rewarded. See ``face_still_term``.
     """
+    center, center_vel, _ = _racket_body_state(env, racket_body_name)
     n = racket_normal(env, racket_body_name)
     w_ang = racket_ang_vel(env, racket_body_name)
     return face_still_term(
-        n, w_ang, env._ht_tau_true, sigma_t=sigma_t, sigma_rate=sigma_rate, w=w
+        n, w_ang, center_vel, env._ht_v_ref_noisy, env._ht_tau_true,
+        sigma_t=sigma_t, sigma_rate=sigma_rate, sigma_v=sigma_v, w=w,
     )
