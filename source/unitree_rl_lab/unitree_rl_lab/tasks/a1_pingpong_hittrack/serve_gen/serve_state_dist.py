@@ -58,12 +58,17 @@ class ServeDist:
         return s[:, 0:3], s[:, 3:6], s[:, 6], s[:, 7], s[:, 8]
 
 
-def fit_dist(fit_npz_path: str, bandwidth_frac: float = 0.2) -> ServeDist:
+def fit_dist(fit_npz_path: str, bandwidth_frac: float = 0.2, holdout_ids=None) -> ServeDist:
     """Load the fitted serves and build the KDE mixture. ``bandwidth_frac`` sets the base jitter as a
     fraction of each dimension's spread (0.2 = 1/5 of the per-dim std -> tight around each real serve).
+    ``holdout_ids`` (iterable of serve_id) are excluded from the mixture centers, so a policy trained on
+    the generated serves is validated on real serves whose neighbourhoods it never saw.
     """
     d = np.load(fit_npz_path, allow_pickle=True)
     X = np.column_stack([d["pos0_mm"], d["v0_mm_s"], d["drag"], d["alpha_z"], d["alpha_xy"]])  # [S,9]
+    if holdout_ids is not None and "serve_id" in d.files:
+        keep = ~np.isin(d["serve_id"].astype(int), np.asarray(sorted(holdout_ids), dtype=int))
+        X = X[keep]
     std = X.std(axis=0)
     std[std == 0.0] = 1.0
     h = bandwidth_frac * std

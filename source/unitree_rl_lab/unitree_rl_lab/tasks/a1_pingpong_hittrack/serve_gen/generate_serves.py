@@ -113,9 +113,23 @@ def main():
     ap.add_argument("--fps", type=float, default=300.0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--serves-per-file", type=int, default=200)
+    ap.add_argument("--holdout-frac", type=float, default=0.0,
+                    help="fraction of real serves held OUT of the KDE anchors (validate on unseen serves)")
+    ap.add_argument("--holdout-seed", type=int, default=0, help="seed for the deterministic holdout split")
+    ap.add_argument("--holdout-out", default=None, help="write held-out serve_ids here (json) for eval baking")
     args = ap.parse_args()
 
-    dist = fit_dist(args.fit)
+    holdout = None
+    if args.holdout_frac > 0.0:
+        import json
+        ids = np.load(args.fit, allow_pickle=True)["serve_id"].astype(int)
+        k = int(round(len(ids) * args.holdout_frac))
+        holdout = sorted(int(x) for x in np.random.default_rng(args.holdout_seed).choice(ids, size=k, replace=False))
+        print(f"holdout {len(holdout)}/{len(ids)} serves (seed={args.holdout_seed}): {holdout}")
+        if args.holdout_out:
+            with open(args.holdout_out, "w") as f:
+                json.dump({"holdout_ids": holdout, "seed": args.holdout_seed, "frac": args.holdout_frac}, f)
+    dist = fit_dist(args.fit, holdout_ids=holdout)
     nm = calibrate(load_dir(args.data_dir))
     rng = np.random.default_rng(args.seed)
     kf_cfg = default_config()
