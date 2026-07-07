@@ -1,0 +1,3 @@
+# generated artifacts (fitted latents + synthetic recordings/npz) — not source
+*.npz
+__pycache__/
