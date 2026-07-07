@@ -2,9 +2,12 @@
 CSVs that bake_hittrack_references.py consumes UNCHANGED.
 
 Pipeline per serve:
-  1. sample (pos0, v0, spin) from the fitted serve-latent distribution (envelope_scale knob);
-  2. roll the spin-aware physics (Magnus on) to a clean ball trajectory on a 300 Hz grid, until it
-     crosses the bake plane; reject if it never reaches the plane / leaves the workspace;
+  1. sample (pos0, v0, drag/bounce) from the KDE mixture over the real fitted serves (a draw = one
+     real serve + small jitter, so it stays a near-neighbour of a serve that reproduces its real
+     trajectory to ~2 cm -- no off-manifold drift); ``--bandwidth`` scales the jitter, ``--interp-frac``
+     optionally fills gaps between neighbouring real serves;
+  2. roll the drag/bounce physics (Magnus OFF, per-serve air_drag/bounce) to a clean ball trajectory on
+     a 300 Hz grid, until it crosses the bake plane; reject if it never reaches / leaves the workspace;
   3. add calibrated mocap position noise;
   4. run ServeGatedKalman (magnus OFF, tuned params) on the noisy mocap -> filtered state + valid flag
      (reproduces the real serve-onset velocity ramp), and predict-to-(deploy plane) each tracking
@@ -16,7 +19,7 @@ Then: python bake_hittrack_references.py --data-dir <out> --out hittrack_referen
 
 Usage:
   python generate_serves.py --fit fitted_serves.npz --data-dir /data/PPO-pingpong/data/0629_RL_traj \
-      --n 2000 --out-dir /data/PPO-pingpong/data/synth_serves --envelope-scale 1.0
+      --n 2000 --out-dir /data/PPO-pingpong/data/synth_serves --bandwidth 1.0
 """
 
 from __future__ import annotations
@@ -58,6 +61,15 @@ def _gen_one(pos0_mm, v0_mm, gcfg, serve_id, nm, rng, kf_cfg, fps, horizon_s, po
     if n < 10:
         return None
     t = t[:n]; clean = clean[:n]
+
+    # physical reachability gate on the crossing (recording frame; bake adds +0.73 z-offset to reach
+    # the sim reach box z in [0.7,1.5], y in [-0.6,0.6]). Rejects Gaussian-tail samples that would put
+    # the ball metres in the air -- the env's baked reset samples ALL serves regardless of the bake
+    # `reachable` flag, so unphysical serves must be dropped here, not just flagged.
+    y_c, z_c = cr[0], cr[1]  # recording-frame meters
+    if not (-0.6 <= y_c <= 0.6 and 0.7 <= z_c + 0.73 <= 1.5):
+        return None
+
     noisy_mm = nm.apply(clean[:, 0:3], rng)  # [n,3] mm
 
     sgk = ServeGatedKalman(kf_cfg)
@@ -94,8 +106,10 @@ def main():
     ap.add_argument("--data-dir", default="/data/PPO-pingpong/data/0629_RL_traj", help="real data for noise calibration")
     ap.add_argument("--n", type=int, default=2000)
     ap.add_argument("--out-dir", default="/data/PPO-pingpong/data/synth_serves")
-    ap.add_argument("--envelope-scale", type=float, default=1.0)
-    ap.add_argument("--magnus-coeff", type=float, default=0.003604)
+    ap.add_argument("--bandwidth", type=float, default=1.0,
+                    help="KDE jitter scale (0=replay real serves exactly, 1=densify, >1 widens & risks drift)")
+    ap.add_argument("--interp-frac", type=float, default=0.0,
+                    help="fraction of draws moved toward a nearest real neighbour (fills gaps; 0=pure jitter)")
     ap.add_argument("--fps", type=float, default=300.0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--serves-per-file", type=int, default=200)
@@ -105,7 +119,7 @@ def main():
     nm = calibrate(load_dir(args.data_dir))
     rng = np.random.default_rng(args.seed)
     kf_cfg = default_config()
-    pos0, v0, drag, alpha_z, alpha_xy = dist.sample(args.n, args.envelope_scale, rng)
+    pos0, v0, drag, alpha_z, alpha_xy = dist.sample(args.n, args.bandwidth, rng, interp_frac=args.interp_frac)
 
     os.makedirs(args.out_dir, exist_ok=True)
     kept = 0
@@ -131,7 +145,7 @@ def main():
             flush(file_idx, file_rows); file_rows = []; file_idx += 1
     if file_rows:
         flush(file_idx, file_rows)
-    print(f"generated {kept}/{args.n} serves (envelope_scale={args.envelope_scale}) -> {args.out_dir}")
+    print(f"generated {kept}/{args.n} serves (bandwidth={args.bandwidth}, interp_frac={args.interp_frac}) -> {args.out_dir}")
     print(f"next: python bake_hittrack_references.py --data-dir {args.out_dir} "
           f"--out hittrack_references_synth.npz --hit-plane-x {BAKE_PLANE_X}")
 
