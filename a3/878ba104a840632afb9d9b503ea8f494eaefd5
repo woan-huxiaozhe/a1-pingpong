@@ -1,0 +1,36 @@
+tests/fixtures/deploy_fk_fixture.json
+  s_62836389611740::t_344dfddf3c2121 1-46
+tests/test_deploy_fk.py
+  s_62836389611740::t_3d49abebc4eff7 1-22
+scripts/deploy/hittrack/fk.py
+  s_35ac446c83519c::t_9b51b0c883c37e 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a3878ba104a840632afb9d9b503ea8f494eaefd5",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_35ac446c83519c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a88ad135c0cdb4eab",
+        "model": "unknown"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
