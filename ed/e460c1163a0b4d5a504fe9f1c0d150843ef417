@@ -1,0 +1,35 @@
+scripts/deploy/hittrack/ros_node.py
+  s_62836389611740::t_387119ce0551f7 79
+  s_62836389611740::t_310b337e62864d 110-111
+tests/test_deploy_state_machine.py
+  s_62836389611740::t_d4a897c26a9920 85-117
+scripts/deploy/hittrack/state_machine.py
+  s_62836389611740::t_ac8261df844cc0 34
+  s_62836389611740::t_8b1bd66c743e73 75,85-89,92-94
+  s_62836389611740::t_d89e0850bd0f47 119-126
+  s_62836389611740::t_f271e9da53d64e 102
+  s_62836389611740::t_c103ffddfd1419 95
+scripts/deploy/hittrack/config.py
+  s_62836389611740::t_dc3811974243dd 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ede460c1163a0b4d5a504fe9f1c0d150843ef417",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
