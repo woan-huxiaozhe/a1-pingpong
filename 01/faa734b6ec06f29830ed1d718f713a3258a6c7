@@ -1,0 +1,26 @@
+tests/test_deploy_state_machine.py
+  s_62836389611740::t_7b5e29d1534a12 1-84
+scripts/deploy/hittrack/state_machine.py
+  s_62836389611740::t_52e9bba1e37004 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "01faa734b6ec06f29830ed1d718f713a3258a6c7",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
