@@ -1,0 +1,28 @@
+scripts/deploy/hittrack/deploy.py
+  s_62836389611740::t_11deb5b6946908 1-48
+scripts/deploy/hittrack/state_machine.py
+  s_62836389611740::t_5367bd5c5519bd 80-84
+scripts/deploy/hittrack/ros_node.py
+  s_62836389611740::t_9ccd0ca5181ef1 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c49cae1f9eae2913181ce42d312e86e470010938",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
