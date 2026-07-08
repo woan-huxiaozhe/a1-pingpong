@@ -1,0 +1,26 @@
+docs/superpowers/specs/2026-07-08-hittrack-deploy-node-design.md
+  s_62836389611740::t_57c07b8c8a4f10 55
+  s_62836389611740::t_670061755ba229 90-93,95,98,100,111
+  s_62836389611740::t_92c299166aef1a 41,44
+  s_62836389611740::t_9d59f4758ec20f 67
+  s_62836389611740::t_9f6f3c460542f0 17
+  s_62836389611740::t_4bb36e37f4b148 151,153
+  s_62836389611740::t_03844d79c9651d 1-16,18-40,42-43,45-54,56-66,68-89,94,96-97,99,101-110,112-150,152,154-168,170-173,175-178
+  s_62836389611740::t_c21483423252c1 169,174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f7ec64cd8915d29d7e653635bed642073444d340",
+  "prompts": {},
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
