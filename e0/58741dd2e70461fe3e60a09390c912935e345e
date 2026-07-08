@@ -1,0 +1,26 @@
+tests/test_deploy_tau_anchor.py
+  s_62836389611740::t_a694a74e3f2312 1-20
+scripts/deploy/hittrack/tau_anchor.py
+  s_62836389611740::t_8d8b100a9c56be 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e058741dd2e70461fe3e60a09390c912935e345e",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
