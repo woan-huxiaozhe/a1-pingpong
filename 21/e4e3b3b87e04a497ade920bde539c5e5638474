@@ -1,0 +1,26 @@
+scripts/deploy/hittrack/pure_import.py
+  s_62836389611740::t_a6d851361e2187 1-31
+scripts/deploy/hittrack/config.py
+  s_62836389611740::t_e58509ae942ee8 1-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "21e4e3b3b87e04a497ade920bde539c5e5638474",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_62836389611740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1c93de2-1f6e-43e1-aedb-75517982a3cc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
