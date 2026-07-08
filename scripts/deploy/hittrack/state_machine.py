@@ -77,6 +77,11 @@ class HitTrackStateMachine:
         if self.state == "TRACKING":
             self._track_tick(now)
 
+    def on_watchdog(self, now):
+        """反馈心跳丢失（/right_joint_states 长时间未到）→ 若在 TRACKING 立即中断到安全态。"""
+        if self.state == "TRACKING":
+            self._interrupt(now, "joint-state feedback watchdog")
+
     # ---- 内部 ----
 
     def _enter_tracking(self):
