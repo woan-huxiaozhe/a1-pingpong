@@ -28,9 +28,28 @@ def hit_track_terms(
     w_pos: float,
     w_vel: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Additive, time-gated position + (full-vector) velocity tracking terms. Each [N]."""
+    """Additive, time-gated position + (full-vector) velocity tracking terms. Each [N].
+
+    **Position tracks a MOVING reference**, not the static crossing point. ``p_ref`` is where the
+    racket should be at the hit instant (tau=0) and ``v_ref`` is its velocity there, so the correct
+    constant-velocity approach line is ``p_ref(tau) = p_ref - v_ref*tau``: at ``tau`` seconds BEFORE
+    the hit (tau>0) the paddle should sit ``v_ref*tau`` behind ``p_ref`` along the swing, and AFTER
+    it (tau<0) it continues ``v_ref*|tau|`` past into the follow-through. This makes the position and
+    velocity targets mutually consistent over the WHOLE time-gate window instead of only at tau=0.
+
+    Why it matters: with a static ``p_ref`` the broad time gate (~0.06 s at sigma_t=0.03) rewards
+    being near the fixed point anywhere in the window, so a paddle can (a) park early at ``p_ref`` and
+    still collect position reward while barely moving, and (b) let the true crossing "slide"
+    ~``|v_ref|*window`` (≈7 cm at 1.2 m/s) along the swing -- both fight the velocity term, which
+    wants a paddle streaming through at ``v_ref``. The moving reference removes the degeneracy
+    (parking / sliding now lands off the line and loses position reward) and turns the broad gate into
+    a dense approach-*trajectory* signal -- the traditional-controller cruise pattern -- rather than a
+    single smeared point. The velocity target is already constant (= the cruise velocity), so only
+    position needed the fix; ``sigma_t`` stays broad on purpose (dense signal, matches the ~±30 ms
+    real cruise plateau)."""
     gate = time_gate(tau, sigma_t)
-    pos_err = torch.norm(p_racket - p_ref, dim=-1)
+    p_ref_t = p_ref - v_ref * tau.unsqueeze(-1)  # constant-velocity approach line through p_ref @ tau=0
+    pos_err = torch.norm(p_racket - p_ref_t, dim=-1)
     vel_err = torch.norm(v_racket - v_ref, dim=-1)
     pos_term = w_pos * gate * gaussian_score(pos_err, sigma_p)
     vel_term = w_vel * gate * gaussian_score(vel_err, sigma_v)

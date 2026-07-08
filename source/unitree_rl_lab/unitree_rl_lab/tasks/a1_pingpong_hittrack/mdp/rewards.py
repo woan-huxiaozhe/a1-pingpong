@@ -18,7 +18,13 @@ from .tracking import face_still_term, hit_track_terms, normal_align_term
 
 
 def hit_ref_pos(env, racket_body_name: str, *, sigma_t: float, sigma_p: float, w_pos: float = 1.0):
-    """Time-gated Gaussian position-tracking reward of the racket center vs the noisy p_ref."""
+    """Time-gated Gaussian position-tracking reward of the racket center vs the MOVING p_ref.
+
+    The target is not the static crossing point but the constant-velocity approach line
+    ``p_ref - v_ref*tau`` (see ``hit_track_terms``), so the paddle is rewarded for streaming along the
+    correct swing trajectory through the window rather than parking at / sliding around the hit point.
+    Uses the same noisy ``p_ref``/``v_ref`` and privileged ``tau_true`` as the velocity term.
+    """
     center, center_vel, _ = _racket_body_state(env, racket_body_name)
     p_racket = center - env.scene.env_origins
     pos_term, _ = hit_track_terms(

@@ -112,28 +112,15 @@ SIGMA_P = 0.05
 # still sees gradient at ~0.6 m/s error, but make the term more valuable than the old 20 * sigma=0.5
 # setup once it starts closing the x-velocity gap.
 SIGMA_V = 0.25
-SIGMA_NORMAL_DEG = 10.0  # angular Gaussian width for blade-normal alignment at the hit instant
-# 20.0 -> 15.0: the time gate (SIGMA_T_NORMAL) was already narrowed once (0.03->0.015) yet normal
-# error stayed ~20deg/92% of hits >10deg, identical between success and failed hits (a systematic
-# tracking floor, not timing noise) -- narrowing the window further has little room left and mostly
-# adds sparsity. Sharpen the angular tolerance instead so the reward gradient pushes harder toward
-# small errors from wherever the policy's swing dynamics actually land.
-# Narrower than SIGMA_T: the blade normal sweeps continuously through the swing (unlike pos/vel,
-# it is never "held"), so gating it over the same +/-2*SIGMA_T window as pos/vel demanded alignment
-# across a span wide enough for the racket to rotate ~20-30 deg, fighting swing speed. Keep pos/vel
-# timing untouched; only tighten the window the normal term actually pays out over.
-# 0.005 -> 0.015 (2026-07-07): the narrowing above was RIGHT before the pre-tilt ready pose but is
-# wrong after it. What the policy optimizes is the *integrated* gated reward W * sum_step gate(tau);
-# sigma_t sets how many steps that covers (0.005 ~= 1.3 steps, 0.015 ~= 3.75, SIGMA_T=0.03 ~= 7.5).
-# So velocity integrates to W_VEL(30)*7.5 = 225 while normal at W_NORMAL(60)*1.3 = 76 -- velocity
-# out-weights normal ~3:1 in return, and the policy rationally trades a square blade for swing speed
-# (the ~20deg floor seen across ALL runs). The prior 30/0.010 -> 60/0.005 bump was a WASH (75 -> 76
-# integrated) that only made the term spikier -> normal_err went 13.9 -> 21 over 600 steps (07-07 run).
-# Widen instead: 60*3.75 = 225 integrated, matching velocity. Now feasible because the wind-up pose
-# cut the ready->hit sweep to ~10deg, so "arrive square early and HOLD through contact" is reachable
-# over a +/-2*sigma window (unlike the old 20-30deg sweep the narrowing was fighting). No parking
-# pathology: a square blade does not conflict with swinging through (unlike the static p_ref that
-# needed the tau<0 gate close). W_NORMAL kept at 60. Isolated change (weight/sigma_normal untouched).
+SIGMA_NORMAL_DEG = 10.0  # angular Gaussian width for blade-normal alignment at the hit instant.
+# Tolerance is set in ANGLE, not time: the ~20deg normal error was a systematic tracking floor
+# (identical on success/failed hits), so a narrower time gate only adds sparsity -- sharpen the
+# angular gradient instead.
+# SIGMA_T_NORMAL: time-gate width for BOTH orientation terms, narrower than SIGMA_T (0.03). The blade
+# normal sweeps continuously (unlike pos/vel it is never "held"), so gating it over the full pos/vel
+# window would demand alignment across a ~20-30deg rotation span and fight swing speed. 0.015 (~3.75
+# gated steps) rewards "arrive square and HOLD through contact" -- reachable since the wind-up pose
+# cut the ready->hit sweep to ~10deg.
 SIGMA_T_NORMAL = 0.015
 # Blade-face *turn-rate* Gaussian width (rad/s), for the still-face term (mdp.hit_ref_normal_rate).
 # 1.0 rad/s ~= 57 deg/s: the knee sits exactly at the traditional controller's demonstrated cruise
@@ -142,41 +129,23 @@ SIGMA_T_NORMAL = 0.015
 # term forces swing speed to be sourced from the proximal sweep (steady face) rather than a wrist
 # snap (which tumbles the face -- the root of the ~20deg normal floor at peak speed). See rewards.py.
 SIGMA_FACE_RATE = 1.0
-# 12.0 -> 30.0 (2026-07-04): normal_err_deg does NOT converge -- it bottoms ~4-5deg early (step ~100,
-# while the swing is still slow) then DIVERGES back to ~19deg in lockstep with vel_err falling. The
-# policy is TRADING a square paddle for swing speed because W_VEL(40) >> W_NORMAL(12) and normal only
-# pays in a narrow +/-2-step gate. A J4 big-motor preview (torque 8->28) did NOT fix it (diverged
-# earlier) -> torque is not the binding cause; the reward balance is. Raise W_NORMAL toward W_POS(20)/
-# W_VEL(40) so holding loft is worth the swing-speed it costs. Isolated change (gate/sigma untouched).
-# 60.0 -> 40.0 (2026-07-07): the SIGMA_T_NORMAL 0.005->0.015 widening (Plan 1) OVER-corrected. It put
-# normal's integrated capacity at 60*3.75 = 225, exactly tying W_VEL(30)*7.5 = 225 -- and with the
-# pre-tilt pose making a square blade cheap, normal then WON the trade: over the resumed run normal_err
-# fell 21->5deg but vel_err_total rose 0.12->0.32 and pos_err 0.022->0.044, while Ep-reward:normal
-# gained +1.52 vs only -0.86 lost on vel+pos, so the policy kept paying speed for an over-square blade
-# (vel_err still climbing, not converged). 5deg is past "square enough"; the marginal 10->5deg gain
-# (gaussian score 0.607->0.882 over sigma=10) is what cannibalizes velocity. Pull normal capacity to
-# 40*3.75 = 150 (~2x the old 75, not 3x): log-fit of capacity->err (75->13.5deg, 225->5deg) predicts
-# ~8deg here -- keeps normal well under the old 13.5deg floor while freeing vel/pos to recover. Keep
-# the wide gate (0.015): rewarding a square blade across the follow-through is stable; only the pull
-# magnitude was wrong. If normal creeps back >12deg, nudge to 45; if vel still high, drop to 35.
-# 40.0 -> 60.0 (2026-07-07, REVERTED): the 40 experiment above is deferred, not run. The new
-# still-face term (hit_ref_normal_rate) attacks the normal_err floor at its ROOT (the wrist-snap
-# tumble) rather than by trading weight against velocity, so we isolate it: restore W_NORMAL to the
-# Plan-1 alignment weight (60) and add the still-face term as the SOLE new change. Re-evaluate the
-# 60-vs-40 alignment weight only after the still-face run shows where normal/vel/pos land.
-W_NORMAL = 60.0
+# Blade-normal ALIGNMENT weight (WHERE the face points at contact). 60.0 -> 25.0 (2026-07-07): at 60
+# the orientation cluster (alignment + still-face) over-solved normal_err (1.85deg median on run
+# 2026-07-07_20-43-08) by trading away velocity (verr 0.33, ee_vx to 76%, success 5%) -- "slow but
+# square" became a local optimum. The still-face term now attacks the wrist-snap tumble at its root,
+# so alignment no longer has to be heavy; drop it to 25 to let pos/vel win the swing back. Nudge back
+# toward ~45 if normal_err creeps >12deg.
+W_NORMAL = 25.0
 W_POS = 15.0
 W_VEL = 30.0
-# Still-face term weight. Integrated capacity ~= W_NORMAL_RATE * sum_step gate(SIGMA_T_NORMAL) ~=
-# 20 * 3.75 = 75 -- a real push but below the alignment term (60*3.75=225), since this is a helper
-# that reshapes HOW speed is sourced, not the primary orientation driver. The kernel now multiplies
-# the still-face score by the velocity-matching Gaussian, so the old "escape by slowing the wrist"
-# route (2026-07-07_10-30-18 collapsed to verr~1.16) is structurally CLOSED: a slow wrist zeroes the
-# bonus. This term therefore only refines a face that is ALREADY swinging fast, so it is best paired
-# with a RESUME from a velocity-solved checkpoint (2026-07-06_20-50-11 model_5500) rather than
-# from-scratch (from cold init the policy still finds the wrist-snap corner first; coupling stops the
-# slow-collapse but does not by itself create the narrow fast+square basin -- the resume does). Watch
-# normal_rate_at_hit (target ~1 rad/s, down from ~3.3) AND that verr stays <=0.2.
+# Still-face term weight (rewards a non-tumbling blade face while swinging; mdp.hit_ref_normal_rate).
+# It reshapes HOW speed is sourced (proximal sweep vs distal wrist snap), so it is a helper alongside
+# the alignment weight, not the primary orientation driver. The kernel multiplies the still-face score
+# by the velocity-matching Gaussian, so the old "escape by slowing the wrist" route (run
+# 2026-07-07_10-30-18 collapsed to verr~1.16) is structurally CLOSED: a slow wrist zeroes the bonus.
+# It therefore only refines a face that is ALREADY swinging fast -> best paired with a RESUME from a
+# velocity-solved checkpoint, not from-scratch. Watch normal_rate_at_hit (target ~1 rad/s, down from
+# ~3.3) AND that verr stays <=0.2.
 W_NORMAL_RATE = 20.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
@@ -195,6 +164,7 @@ JOINT_POS_DELTA_HISTORY_LENGTH = 5
 # "hittrack_references.npz" is the original 72 real serves.
 HITTRACK_USE_BAKED = True
 HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
+# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real.npz")
 
 
 @configclass
