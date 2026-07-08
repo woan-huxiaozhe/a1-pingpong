@@ -54,6 +54,7 @@ READY_JOINT_POS: list[float] = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.0
 RESET_X_GATE: tuple[float, float] = (0.7, 1.4)
 PRED_LOSS_TOLERANCE_S: float = 0.08  # 预测丢失容忍窗口
 JOINT_STATE_WATCHDOG_S: float = 0.2  # 反馈心跳看门狗阈值
+WATCHDOG_PERIOD_S: float = 0.1       # 看门狗 / 时间-housekeeping 定时器周期
 READY_RETURN_TIMEOUT_S: float = 1.5  # 发归位信号后等待固定超时
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ class HitTrackStateMachine:
         self._last_action = torch.zeros(7, dtype=torch.float32)
         self._last_activity = 0.0      # 进入 TRACKING 或最近一次 valid 预测的时刻（丢失计时基准）
         self._return_start = 0.0
+        self._first_infer = True       # 首个推理 tick = 训练 reset step（delta 历史置零）
 
         # 预计算后处理常量（float32 张量，[7]）
         margin = C.LIMIT_MARGIN
@@ -71,8 +72,7 @@ class HitTrackStateMachine:
         """方案 C 的 tick 源。"""
         self._q = torch.as_tensor(q, dtype=torch.float32)
         if self.state == "RETURNING":
-            if now - self._return_start >= C.READY_RETURN_TIMEOUT_S:
-                self.state = "READY"
+            self._maybe_finish_return(now)
             return
         if self.state == "TRACKING":
             self._track_tick(now)
@@ -82,7 +82,16 @@ class HitTrackStateMachine:
         if self.state == "TRACKING":
             self._interrupt(now, "joint-state feedback watchdog")
 
+    def on_tick(self, now):
+        """时间驱动 housekeeping（ROS 看门狗定时器调用，与关节反馈无关）：即使
+        /right_joint_states 停止，也让 RETURNING 归位超时照常推进，避免卡在 RETURNING。"""
+        self._maybe_finish_return(now)
+
     # ---- 内部 ----
+
+    def _maybe_finish_return(self, now):
+        if self.state == "RETURNING" and now - self._return_start >= C.READY_RETURN_TIMEOUT_S:
+            self.state = "READY"
 
     def _enter_tracking(self):
         self._tau.reset()
@@ -90,6 +99,7 @@ class HitTrackStateMachine:
         self._prev_target = self._q.clone()
         self._last_action = torch.zeros(7, dtype=torch.float32)
         self._last_activity = self._now_fn()
+        self._first_infer = True
         self.state = "TRACKING"
         self._cb.publish_enable(True)
 
@@ -106,6 +116,14 @@ class HitTrackStateMachine:
             return
         if not anchored:
             return  # 收到首个 valid 预测前原地悬停，不推理不发动作
+        # 关节 delta 历史与训练同构（observations.joint_pos_delta_history 是 push-then-read）：
+        # 先把当前 q 压入历史再读 deltas，使最新一格 = q_t - q_{t-1}（瞬时关节速度，不滞后一拍）。
+        # 首个推理 tick 等价训练 reset step（step==0）：整段填当前 q，deltas 为 0。
+        if self._first_infer:
+            self._hist.reset(self._q)
+            self._first_infer = False
+        else:
+            self._hist.push(self._q)
         obs = assemble_obs(self._q, self._tau, tau_live, self._last_action, self._plan_fn, self._hist)
         raw = self._policy(obs.reshape(1, -1))[0]
         if not bool(torch.isfinite(raw).all()):
@@ -121,7 +139,6 @@ class HitTrackStateMachine:
         self._prev_target = target
         self._cb.publish_action(target.tolist())
         self._last_action = raw
-        self._hist.push(self._q)
 
     def _begin_return(self, now):
         self._cb.publish_enable(False)

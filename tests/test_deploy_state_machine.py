@@ -82,3 +82,36 @@ def test_normal_end_on_tau_past_margin():
     sm.on_pred((0.05, 1.0, -4.0, 0.0, -0.5, 0.02, True), now[0])
     now[0] += 0.02 + C.POST_MARGIN_S + 0.01; sm.on_joint_state(C.READY_JOINT_POS, now[0])
     assert rec.enables[-1] is False and rec.resets >= 1
+
+
+def test_delta_history_not_lagged_vs_training():
+    # 关节 delta 历史必须 push-then-read（最新一格 = q_t - q_{t-1}），不滞后一拍。
+    now = [0.0]; rec = Rec(); captured = []
+
+    def policy(o):
+        captured.append(o.clone())
+        return torch.zeros(1, 7)
+
+    sm = HitTrackStateMachine(
+        policy=policy, plan_fn=load_plan_hit_reference(),
+        cjdt_fn=load_compute_joint_delta_target(), callbacks=rec, now_fn=lambda: now[0])
+    sm.on_startup(); now[0] = C.READY_RETURN_TIMEOUT_S + 0.1
+    q0 = list(C.READY_JOINT_POS)
+    sm.on_joint_state(q0, now[0]); sm.on_ball_pos(1.0); sm.on_kalman_reset()
+    sm.on_pred((0.05, 1.0, -4.0, 0.0, -0.5, 0.4, True), now[0])
+    now[0] += 0.01; sm.on_joint_state(q0, now[0])           # 首个推理 tick = reset step -> deltas 全 0
+    assert torch.allclose(captured[-1][0, 7:42], torch.zeros(35), atol=1e-6)
+    q1 = list(q0); q1[0] += 0.05
+    now[0] += 0.01; sm.on_joint_state(q1, now[0])           # 第二 tick: 最新一格 = q1 - q0
+    newest = captured[-1][0, 7:14]                          # history[0]-history[1] 的 7 个关节
+    assert abs(float(newest[0]) - 0.05) < 1e-5
+    assert torch.allclose(newest[1:], torch.zeros(6), atol=1e-6)
+
+
+def test_returning_advances_without_joint_states():
+    # 反馈停了也不能卡在 RETURNING：on_tick（看门狗定时器驱动）应推进归位超时。
+    now = [0.0]; rec = Rec(); sm = _sm(now, rec); sm.on_startup()
+    assert sm.state == "RETURNING"
+    now[0] = C.READY_RETURN_TIMEOUT_S + 0.1
+    sm.on_tick(now[0])                                     # 无任何 on_joint_state
+    assert sm.state == "READY"

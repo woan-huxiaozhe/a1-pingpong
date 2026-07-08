@@ -76,7 +76,7 @@ class HitTrackDeployNode(Node):
                 "pingpong_kalman.msg.PredictedHit 不可用——已跳过预测订阅（纯链路冒烟降级）。"
                 "真机联调前请先 source pingpong_kalman 工作区。")
 
-        self.create_timer(0.1, self._on_watchdog)  # 10Hz 心跳看门狗
+        self.create_timer(C.WATCHDOG_PERIOD_S, self._on_watchdog)  # 时间-housekeeping + 心跳看门狗
         self._sm.on_startup()
 
     def _now(self):
@@ -106,8 +106,7 @@ class HitTrackDeployNode(Node):
         self._sm.on_kalman_reset()
 
     def _on_watchdog(self):
-        if self._last_joint_time is None:
-            return
         now = self._now()
-        if now - self._last_joint_time > C.JOINT_STATE_WATCHDOG_S:
+        self._sm.on_tick(now)  # RETURNING 归位超时推进，与关节反馈是否到达无关（防卡死）
+        if self._last_joint_time is not None and now - self._last_joint_time > C.JOINT_STATE_WATCHDOG_S:
             self._sm.on_watchdog(now)
