@@ -1,0 +1,28 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/tracking.py
+  s_ea467cb7427f66::t_f9b4b68bfc7437 78,84-87
+  s_ea467cb7427f66::t_a12a615e28a4d6 39-40
+  s_ea467cb7427f66::t_a0780bf901eee9 65-66
+  s_ea467cb7427f66::t_6dbac44563f0f1 13-24
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_ea467cb7427f66::t_dac7f94514029f 300
+  s_ea467cb7427f66::t_1d5a5baf4b4ea3 170-181
+  s_ea467cb7427f66::t_4d997267f15a58 284,289
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/rewards.py
+  s_ea467cb7427f66::t_8060269cc9a06c 20,27,33,37-42,47,57,65-66,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a45beff43d043856a087d51102d78ea357ba6d0d",
+  "prompts": {},
+  "sessions": {
+    "s_ea467cb7427f66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fe5eb48-59dc-471b-aece-60cda3ad87ac",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
