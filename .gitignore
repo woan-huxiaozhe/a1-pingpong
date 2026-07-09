@@ -83,10 +83,10 @@ datasets
 !source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/hittrack_references.npz
 *.npz.bak-*
 
-# Reference papers (keep out of repo, too large)
-docs/*.pdf
-
 # Patch/merge backup artifacts
 *.orig
 
 data/
+
+# Local notes (not tracked)
+docs/
