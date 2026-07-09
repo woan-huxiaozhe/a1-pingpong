@@ -10,6 +10,21 @@ def time_gate(tau: torch.Tensor, sigma_t: float) -> torch.Tensor:
     return torch.exp(-0.5 * (tau / sigma_t) ** 2)
 
 
+def approach_gate(tau: torch.Tensor, sigma_t_wide: float, sigma_t_core: float) -> torch.Tensor:
+    """Wide wind-up gate with the narrow core hit-gate carved out of its center.
+
+    ``exp(-0.5(tau/sigma_t_wide)^2) * (1 - exp(-0.5(tau/sigma_t_core)^2))``: a broad Gaussian over the
+    approach forced to ZERO at tau=0 (where the sharp hit gate peaks) and alive only in the pre-hit
+    wind-up. This makes any approach-window term COMPLEMENTARY to the core hit terms by construction --
+    they never overlap at the hit instant -- so wide-gate guidance cannot distort the tuned
+    pos/vel/normal balance at tau=0 (the core terms own it); it owns the wind-up window the narrow core
+    gates are blind to (|tau| >~ 2*sigma_t_core). ``sigma_t_wide`` sets how far out the wind-up signal
+    reaches; ``sigma_t_core`` should match the core term's ``sigma_t`` so the carve-out lines up exactly."""
+    wide = torch.exp(-0.5 * (tau / sigma_t_wide) ** 2)
+    core = torch.exp(-0.5 * (tau / sigma_t_core) ** 2)
+    return wide * (1.0 - core)
+
+
 def gaussian_score(error_norm: torch.Tensor, sigma: float, tol: float = 0.0) -> torch.Tensor:
     """exp(-max(0, ||e|| - tol)^2 / (2 sigma^2)): a flat top (=1) inside the tolerance box
     ``||e|| <= tol`` with Gaussian decay beyond it. ``tol=0.0`` recovers the plain Gaussian.
@@ -121,3 +136,35 @@ def face_still_term(
     vel_err = torch.norm(v_racket - v_ref, dim=-1)
     speed_gate = gaussian_score(vel_err, sigma_v)  # no still-face credit unless swinging at v_ref
     return w * gate * gaussian_score(face_rate, sigma_rate) * speed_gate
+
+
+def approach_vel_term(
+    v_racket: torch.Tensor,
+    v_ref: torch.Tensor,
+    tau: torch.Tensor,
+    *,
+    sigma_t_wide: float,
+    sigma_t_core: float,
+    sigma_v: float,
+    w: float,
+) -> torch.Tensor:
+    """Wide-gate constant-v_ref velocity guidance across the pre-hit wind-up [N] (task-space, demo-free).
+
+    The core hit terms are gated within ~2*SIGMA_T (~60 ms) of the hit, so PPO gets NO gradient for
+    what it does 70-200 ms before contact -- exactly the window where a proximal cruise must be
+    initiated. With no early signal the only actuator that can fix the hit-instant state inside the
+    narrow gate is the light wrist, so PPO learns a late wrist snap (measured play: peak |ee_v| arrives
+    ~55 ms AFTER the hit, tumbling the blade face ~160 deg/s -- the root of the normal-error tail). This
+    term rewards the racket for already streaming at the hit velocity ``v_ref`` (full vector, CONSTANT
+    target) through the wind-up, so "already cruising at v_ref by tau~0.1 s" pays and the late snap
+    loses its reason to exist.
+
+    Demo-free: ``v_ref`` is the model reference extended in time, NOT an imitation target -- the policy
+    still discovers its own joint coordination (and may beat the traditional cruise). ``sigma_v`` is
+    deliberately BROAD (vs the sharp core sigma_v) so the reward has gradient while the racket is still
+    ramping from rest (|v_racket - v_ref| ~ |v_ref| early on); a sharp sigma_v would be ~0 until already
+    near v_ref and could not bootstrap the early acceleration. The ``approach_gate`` is zero at tau=0,
+    so this never competes with the sharp core velocity term at the hit instant (see ``approach_gate``)."""
+    gate = approach_gate(tau, sigma_t_wide, sigma_t_core)
+    vel_err = torch.norm(v_racket - v_ref, dim=-1)
+    return w * gate * gaussian_score(vel_err, sigma_v)

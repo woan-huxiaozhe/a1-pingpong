@@ -179,6 +179,23 @@ W_NORMAL_RATE = 0.0
 POS_TOL = 0.02
 VEL_TOL = 0.18  # a hair inside the 0.20 success gate for margin
 NORMAL_TOL_DEG = 9.0  # a hair inside the 10 deg target
+
+# --- Wide-gate constant-v_ref approach guidance (2026-07-09) ---
+# Root cause of the late wrist snap: the core hit terms are gated within ~2*SIGMA_T (~60 ms) of the
+# hit, so PPO gets NO gradient for the 70-200 ms wind-up where a proximal cruise must be initiated;
+# the only actuator that can fix the hit-instant state inside the narrow gate is the light wrist -> it
+# learns a late snap (measured play: peak |ee_v| ~55 ms AFTER the hit, blade face tumbling ~160 deg/s,
+# which is the root of the normal-error tail). This term rewards the racket for already streaming at
+# v_ref (full vector, CONSTANT target) through the wind-up, so cruising-through pays and the snap loses
+# its reason to exist. Demo-free: v_ref is the model reference extended in time -- the traditional log
+# only PROVES the flat push is feasible (vx~0.74 with face-turn 5-9 deg/s), it is NOT an imitation
+# target, so RL still finds its own (possibly better) joint coordination. The gate is a wide Gaussian
+# with the core hit-gate carved out of its center (mdp.approach_gate) -> ZERO at tau=0, so it cannot
+# fight the tuned sharp velocity term at the hit instant (which solely owns tau=0).
+SIGMA_T_APPROACH = 0.09   # wide-gate width (s): product gate peaks ~tau 0.05-0.08, tapers to ~0.2 s
+SIGMA_V_APPROACH = 0.70   # BROAD (vs core SIGMA_V=0.25) so there IS gradient while still ramping from rest
+W_APPROACH_VEL = 10.0     # ~1/3 of W_VEL(30); primary knob -- raise if the wind-up stays flat, lower if it swamps hit precision
+
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
 REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
@@ -317,6 +334,23 @@ class RewardsCfg:
             "sigma_t": SIGMA_T_NORMAL,
             "sigma_rate": SIGMA_FACE_RATE,
             "sigma_v": SIGMA_V,
+        },
+    )
+
+    # --- wind-up approach guidance: wide-gate constant-v_ref velocity (2026-07-09) ---
+    # Fills the gradient hole the narrow core gates leave 70-200 ms before the hit so the policy
+    # cruises up to v_ref early instead of deferring speed to a late wrist snap. Gate carved to 0 at
+    # tau=0 (mdp.approach_gate) -> the sharp hit_ref_vel still solely owns the hit instant. Task-space,
+    # demo-free (v_ref is the model reference extended in time, not an imitation target). See the
+    # SIGMA_T_APPROACH / SIGMA_V_APPROACH / W_APPROACH_VEL block above for the rationale/knobs.
+    hit_ref_approach_vel = RewTerm(
+        func=mdp.hit_ref_approach_vel,
+        weight=W_APPROACH_VEL,
+        params={
+            "racket_body_name": RACKET_BODY_NAME,
+            "sigma_t_wide": SIGMA_T_APPROACH,
+            "sigma_t_core": SIGMA_T,
+            "sigma_v": SIGMA_V_APPROACH,
         },
     )
 

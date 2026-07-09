@@ -11,6 +11,8 @@ time_gate = _tracking.time_gate
 gaussian_score = _tracking.gaussian_score
 hit_track_terms = _tracking.hit_track_terms
 normal_align_term = _tracking.normal_align_term
+approach_gate = _tracking.approach_gate
+approach_vel_term = _tracking.approach_vel_term
 
 
 def test_time_gate_peaks_at_zero():
@@ -57,3 +59,25 @@ def test_normal_align_term_uses_angular_gaussian():
 
     assert torch.isclose(perfect[0], torch.tensor(1.0))
     assert torch.isclose(off[0], torch.tensor(math.exp(-0.5)), atol=1e-6)
+
+
+def test_approach_gate_zero_at_hit_alive_in_windup():
+    # carved to ZERO at tau=0 (the sharp core gate owns the hit instant), alive in the wind-up
+    tau = torch.tensor([0.0, 0.05, 0.10])
+    g = approach_gate(tau, sigma_t_wide=0.09, sigma_t_core=0.03)
+    assert g[0] < 1e-6
+    assert g[1] > 0.3 and g[2] > 0.1
+
+
+def test_approach_vel_rewards_cruise_in_windup_not_at_hit():
+    v_ref = torch.tensor([[1.2, 0.0, 0.0]])
+    kw = dict(sigma_t_wide=0.09, sigma_t_core=0.03, sigma_v=0.7, w=10.0)
+    # at the hit instant the gate is ~0, so even a perfect velocity match pays ~nothing here
+    at_hit = approach_vel_term(v_ref, v_ref, torch.zeros(1), **kw)
+    assert at_hit[0] < 1e-3
+    # in the wind-up, cruising at v_ref pays more than being at rest, and the broad sigma_v keeps a
+    # non-zero (bootstrap) gradient even from rest
+    tau = torch.full((1,), 0.10)
+    matched = approach_vel_term(v_ref, v_ref.clone(), tau, **kw)
+    at_rest = approach_vel_term(torch.zeros(1, 3), v_ref, tau, **kw)
+    assert matched[0] > at_rest[0] > 0.0

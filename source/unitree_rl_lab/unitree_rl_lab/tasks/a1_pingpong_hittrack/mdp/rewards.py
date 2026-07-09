@@ -14,7 +14,7 @@ from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import (
     racket_normal,
 )
 
-from .tracking import face_still_term, hit_track_terms, normal_align_term
+from .tracking import approach_vel_term, face_still_term, hit_track_terms, normal_align_term
 
 
 def hit_ref_pos(env, racket_body_name: str, *, sigma_t: float, sigma_p: float, pos_tol: float = 0.0, w_pos: float = 1.0):
@@ -46,6 +46,30 @@ def hit_ref_vel(env, racket_body_name: str, *, sigma_t: float, sigma_v: float, v
         p_racket, center_vel, env._ht_p_ref_noisy, env._ht_v_ref_noisy, env._ht_tau_true,
         sigma_t=sigma_t, sigma_p=1.0, sigma_v=sigma_v, w_pos=0.0, w_vel=w_vel, vel_tol=vel_tol)
     return vel_term
+
+
+def hit_ref_approach_vel(
+    env,
+    racket_body_name: str,
+    *,
+    sigma_t_wide: float,
+    sigma_t_core: float,
+    sigma_v: float,
+    w: float = 1.0,
+):
+    """Wide-gate constant-v_ref velocity guidance across the pre-hit wind-up (task-space, demo-free).
+
+    Fills the gradient hole the narrow core gates leave in the 70-200 ms pre-hit window (where a
+    proximal cruise must start), rewarding the racket for already streaming at ``v_ref`` before the hit
+    so the policy stops deferring speed to a late wrist snap (measured: peak |ee_v| ~55 ms AFTER the
+    hit, face tumbling ~160 deg/s). The gate is carved to ZERO at tau=0, so the sharp ``hit_ref_vel``
+    still solely owns the hit instant (see ``approach_vel_term`` / ``approach_gate``). Uses the same
+    noisy ``v_ref`` and privileged ``tau_true`` as ``hit_ref_vel``; ``v_ref`` is the model reference
+    extended in time, not an imitation target."""
+    _, center_vel, _ = _racket_body_state(env, racket_body_name)
+    return approach_vel_term(
+        center_vel, env._ht_v_ref_noisy, env._ht_tau_true,
+        sigma_t_wide=sigma_t_wide, sigma_t_core=sigma_t_core, sigma_v=sigma_v, w=w)
 
 
 def hit_ref_normal(
