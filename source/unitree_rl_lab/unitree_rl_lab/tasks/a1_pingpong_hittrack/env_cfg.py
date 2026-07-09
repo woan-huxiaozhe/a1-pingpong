@@ -167,6 +167,18 @@ W_VEL = 30.0
 # wrist-tumble at its kinematic root instead. Re-enable (~10-20) only if normal_rate_at_hit creeps back
 # toward ~3 rad/s after training.
 W_NORMAL_RATE = 0.0
+# --- Tolerance-plateau ("box") tracking (2026-07-09) ---
+# The pos/vel/normal terms were unbounded Gaussians: vel keeps rewarding verr->0, and closing verr
+# physically raises normal (wrist tumble / J4-6 torque saturation), so the optimizer perpetually
+# trades normal for speed it no longer needs -- run 2026-07-08_20-42-36 showed normal 5.3->8.5deg
+# WHILE pos/vel kept falling. A flat top inside each tolerance zeroes that marginal gradient once a
+# term is "good enough", so the three stop fighting and gradient concentrates on the errors still
+# OUTSIDE tolerance (the hard tail serves). Tolerances sit at / just inside the acceptance targets
+# (pos<2cm, vel<0.2, normal<10deg); SIGMA_* stay as the beyond-box decay widths (dense pull-in for
+# the tail). tol=0 anywhere recovers the old pure Gaussian.
+POS_TOL = 0.02
+VEL_TOL = 0.18  # a hair inside the 0.20 success gate for margin
+NORMAL_TOL_DEG = 9.0  # a hair inside the 10 deg target
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
 REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
@@ -269,12 +281,12 @@ class RewardsCfg:
     hit_ref_pos = RewTerm(
         func=mdp.hit_ref_pos,
         weight=W_POS,
-        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T, "sigma_p": SIGMA_P},
+        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T, "sigma_p": SIGMA_P, "pos_tol": POS_TOL},
     )
     hit_ref_vel = RewTerm(
         func=mdp.hit_ref_vel,
         weight=W_VEL,
-        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T, "sigma_v": SIGMA_V},
+        params={"racket_body_name": RACKET_BODY_NAME, "sigma_t": SIGMA_T, "sigma_v": SIGMA_V, "vel_tol": VEL_TOL},
     )
     # blade-normal alignment at the hit instant (previously UNREWARDED -> normal drifted to ~100 deg
     # error). Cosine kernel, gated identically to pos/vel via _ht_tau_true.
@@ -285,6 +297,7 @@ class RewardsCfg:
             "racket_body_name": RACKET_BODY_NAME,
             "sigma_t": SIGMA_T_NORMAL,
             "sigma_normal_deg": SIGMA_NORMAL_DEG,
+            "normal_tol_deg": NORMAL_TOL_DEG,
         },
     )
     # still-face at the hit instant: reward low blade-face turn rate |dn/dt|=|omega x n|, gated at

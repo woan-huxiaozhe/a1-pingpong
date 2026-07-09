@@ -10,9 +10,18 @@ def time_gate(tau: torch.Tensor, sigma_t: float) -> torch.Tensor:
     return torch.exp(-0.5 * (tau / sigma_t) ** 2)
 
 
-def gaussian_score(error_norm: torch.Tensor, sigma: float) -> torch.Tensor:
-    """exp(-||e||^2 / (2 sigma^2)) given the L2 norm ||e||."""
-    return torch.exp(-(error_norm**2) / (2.0 * sigma * sigma))
+def gaussian_score(error_norm: torch.Tensor, sigma: float, tol: float = 0.0) -> torch.Tensor:
+    """exp(-max(0, ||e|| - tol)^2 / (2 sigma^2)): a flat top (=1) inside the tolerance box
+    ``||e|| <= tol`` with Gaussian decay beyond it. ``tol=0.0`` recovers the plain Gaussian.
+
+    Why the flat top: the pos/vel/normal terms are otherwise unbounded Gaussians that keep rewarding
+    error->0, so the optimizer perpetually trades the cheapest term against the others (closing verr
+    physically raises normal via the wrist tumble/torque saturation, so vel and normal fight forever
+    along a fixed Pareto front). Zeroing the marginal gradient once a term is INSIDE its tolerance
+    stops that tug-of-war -- a "good enough" term no longer pays to over-optimize at another's expense
+    -- and concentrates gradient on the errors still OUTSIDE tolerance (the hard tail serves)."""
+    e = torch.clamp(error_norm - tol, min=0.0)
+    return torch.exp(-(e**2) / (2.0 * sigma * sigma))
 
 
 def hit_track_terms(
@@ -27,6 +36,8 @@ def hit_track_terms(
     sigma_v: float,
     w_pos: float,
     w_vel: float,
+    pos_tol: float = 0.0,
+    vel_tol: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Additive, time-gated position + (full-vector) velocity tracking terms. Each [N].
 
@@ -51,8 +62,8 @@ def hit_track_terms(
     p_ref_t = p_ref - v_ref * tau.unsqueeze(-1)  # constant-velocity approach line through p_ref @ tau=0
     pos_err = torch.norm(p_racket - p_ref_t, dim=-1)
     vel_err = torch.norm(v_racket - v_ref, dim=-1)
-    pos_term = w_pos * gate * gaussian_score(pos_err, sigma_p)
-    vel_term = w_vel * gate * gaussian_score(vel_err, sigma_v)
+    pos_term = w_pos * gate * gaussian_score(pos_err, sigma_p, tol=pos_tol)
+    vel_term = w_vel * gate * gaussian_score(vel_err, sigma_v, tol=vel_tol)
     return pos_term, vel_term
 
 
@@ -64,13 +75,16 @@ def normal_align_term(
     sigma_t: float,
     sigma_normal_deg: float,
     w_normal: float,
+    normal_tol_deg: float = 0.0,
 ) -> torch.Tensor:
     """Time-gated blade-normal alignment term [N] using a Gaussian over angular error."""
     gate = time_gate(tau, sigma_t)
     cos = (n_racket * n_ref).sum(dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos)
-    sigma = torch.as_tensor(sigma_normal_deg, dtype=angle.dtype, device=angle.device) * torch.pi / 180.0
-    return w_normal * gate * gaussian_score(angle, sigma)
+    deg2rad = torch.pi / 180.0
+    sigma = torch.as_tensor(sigma_normal_deg, dtype=angle.dtype, device=angle.device) * deg2rad
+    tol = float(normal_tol_deg) * deg2rad
+    return w_normal * gate * gaussian_score(angle, sigma, tol=tol)
 
 
 def face_still_term(
