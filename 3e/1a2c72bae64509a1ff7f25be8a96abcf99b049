@@ -1,0 +1,29 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/tracking.py
+  s_ea467cb7427f66::t_61dc53a505a988 13-27
+  s_ea467cb7427f66::t_148a460bf8b7bc 139-170
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/rewards.py
+  s_ea467cb7427f66::t_c0580d09a7364c 51-74
+  s_ea467cb7427f66::t_a66b4f3ae82045 17
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_ea467cb7427f66::t_041349a3726c16 182-198
+  s_ea467cb7427f66::t_420ca799588bad 340-356
+tests/test_hittrack_tracking.py
+  s_ea467cb7427f66::t_a4324c12604a4f 62-83
+  s_ea467cb7427f66::t_53baa45ca8e7fa 14-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3e1a2c72bae64509a1ff7f25be8a96abcf99b049",
+  "prompts": {},
+  "sessions": {
+    "s_ea467cb7427f66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fe5eb48-59dc-471b-aece-60cda3ad87ac",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
