@@ -1,0 +1,19 @@
+.gitignore
+  s_62966b51d3e8ab::t_b0904f457488e4 90-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "920eb26366a9e06473550a8c5ec42a1b6cdbbec1",
+  "prompts": {},
+  "sessions": {
+    "s_62966b51d3e8ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "81a4bb37-b653-4c77-8914-bac58e93b0b4",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
