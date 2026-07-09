@@ -76,7 +76,17 @@ MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  
 #     ready->hit sweep the wrist must do drops 21.1 -> ~10 deg (per-serve residual floor ~7.5deg), so
 #     the torque-saturated (88-92%) wrist is freed to HOLD loft -> should shrink the normal-err tail.
 # Requires a FRESH retrain (not a resume: ready pose changed substantially, max|Δq|=0.37).
-READY_JOINT_POS = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.094]
+# 2026-07-08: EXTRA pre-tilt (incremental on the 07-06 wind-up pose). model_13000 (run A) FK analysis
+# showed the ready->mean-desired-hit-normal sweep still = 10.70deg vs a per-serve floor of ~6.7deg, and
+# the wrist was torque-saturated (J4-6 95-98% of 8 N*m) HOLDING the blade square through the swing --
+# the real vx<->normal coupling. Damped-LS on the FK Jacobian at ready (deploy fk.py, frame residual
+# 0.024deg vs the env rn) rotated the ready normal ~30% further toward the mean desired hit normal
+# [0.934,-0.022,0.356], cutting the sweep 10.70 -> 8.68deg (max|Δq|=0.059 rad, blade center held to
+# 0.5 mm) so the wrist spends less torque re-aiming and can hold loft while the proximal chain swings
+# faster. Tilt lives in J4-7 (proximal J1-3 move <0.016 rad). max|Δq|=0.059 (<< the 0.37 that forced a
+# fresh retrain), so a RESUME from A's checkpoint should re-adapt quickly.
+# READY_JOINT_POS = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.094]  # 07-06 wind-up pose (pre-tilt)
+READY_JOINT_POS = [1.369, -0.651, 1.656, -1.767, 0.145, 0.684, -2.153]
 
 READY_LIFT_POS = -0.22
 
@@ -135,7 +145,12 @@ SIGMA_FACE_RATE = 1.0
 # square" became a local optimum. The still-face term now attacks the wrist-snap tumble at its root,
 # so alignment no longer has to be heavy; drop it to 25 to let pos/vel win the swing back. Nudge back
 # toward ~45 if normal_err creeps >12deg.
-W_NORMAL = 25.0
+# 2026-07-08 revert to run A's balance (W_NORMAL 35->40, W_POS 25->15) for a clean pose+damping test:
+# A (07-07_15-09, W_NORMAL=40, W_POS=15, NO still-face) reached pos 2.1cm / vel_x 0.20 / normal 9.75deg
+# -- the best 3-way balance of the four runs -- so we resume A into ITS OWN reward landscape + the new
+# pre-tilt/damping, isolating the kinematic change. W_POS back to 15: D's bump to 25 barely moved pos
+# (0.035->0.033) yet cost the swing, confirming pos is training-length/reach limited, not weight limited.
+W_NORMAL = 40.0
 W_POS = 15.0
 W_VEL = 30.0
 # Still-face term weight (rewards a non-tumbling blade face while swinging; mdp.hit_ref_normal_rate).
@@ -146,7 +161,12 @@ W_VEL = 30.0
 # It therefore only refines a face that is ALREADY swinging fast -> best paired with a RESUME from a
 # velocity-solved checkpoint, not from-scratch. Watch normal_rate_at_hit (target ~1 rad/s, down from
 # ~3.3) AND that verr stays <=0.2.
-W_NORMAL_RATE = 20.0
+# 2026-07-08 -> 0.0: DISABLE still-face for the run-A resume. It contributes ~0.01 reward in every run
+# (the velocity coupling structurally zeroes it) yet the runs carrying it (B/C/D) had ~3.5x worse pos_z
+# and no vel<->normal frontier gain vs A (which never had the term). The new ready pre-tilt attacks the
+# wrist-tumble at its kinematic root instead. Re-enable (~10-20) only if normal_rate_at_hit creeps back
+# toward ~3 rad/s after training.
+W_NORMAL_RATE = 0.0
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
 REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to

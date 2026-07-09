@@ -20,7 +20,14 @@ A1_ARM_DAMPING = {
     # at the hit the proximal joints sat at 8-16% velocity / 33-41% torque util (model_10000) despite a
     # saturated action, so lowering damping raises the velocity ceiling (and lowers holding torque)
     # without touching the 28 N*m effort headroom. Conservative 30% cut; the real arm's D must match.
-    "joint_yb_1": 3.5, "joint_yb_2": 3.5, "joint_yb_3": 3.5,
+    # J1-3 3.5->3.0 (2026-07-08): model_13000 (run A) hit-instant telemetry showed the proximal swing is
+    # a SHORT torque-limited ramp (J1-2 peak 83-84% of 28 N*m) whose |ee_vx| peak lands ~47 ms AFTER the
+    # hit -- the arm is still accelerating at tau=0 (reaches ~83% of v_ref, peak ~94%). Actions clamp only
+    # 4-11% and joint vel is 30-44% of limit, so the interface/vel-cap is NOT the binding constraint --
+    # a steeper accel transient is. Dropping D 3.5->3.0 raises K*scale/D (200*0.20/3.0=13.3 rad/s, still
+    # above the 8 rad/s HW cap so it uncaps within HW) and makes the ramp reach v_ref earlier in the
+    # window. ~14% step (smaller than the last 30% cut); the real arm's D must track this.
+    "joint_yb_1": 3.0, "joint_yb_2": 3.0, "joint_yb_3": 3.0,
     # J4-7 kept small (0.5); the 2026-07-04 J4 big-motor preview (K/effort/D/vel -> J1-3 class) was
     # reverted: doubling J4 torque did NOT decouple normal error from swing speed (it diverged earlier),
     # so J4 torque is not the binding cause -- the lever is the reward balance, not the wrist motor.
