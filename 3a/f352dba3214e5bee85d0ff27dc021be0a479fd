@@ -1,0 +1,28 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_ea467cb7427f66::t_25d2f5ed4359a7 148-153
+  s_ea467cb7427f66::t_e57eed20f1a64d 79-89
+  s_ea467cb7427f66::t_d19b2a574b3b0e 164-169
+source/unitree_rl_lab/unitree_rl_lab/assets/robots/a1.py
+  s_ea467cb7427f66::t_fb5bd9328d570b 23-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3af352dba3214e5bee85d0ff27dc021be0a479fd",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_ea467cb7427f66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fe5eb48-59dc-471b-aece-60cda3ad87ac",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
