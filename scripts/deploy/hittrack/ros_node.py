@@ -2,7 +2,8 @@
 
 方案 C：主循环挂在 /right_joint_states 回调上（与 armcontrol 控制节奏对齐）。订阅球体预测/位置/
 reset，把事件转交纯逻辑状态机 HitTrackStateMachine；状态机的副作用经回调发布到 /model_action、
-/model_control/enable、/model_control/reset。额外一个 10Hz 看门狗检测反馈心跳丢失。
+/model_control/reset。额外一个 10Hz 看门狗检测反馈心跳丢失。
+enable(arm/disarm) 交底层手动掌管，本节点永不发布 /model_control/enable。
 
 本文件是薄接线层：不含控制/坐标/观测数学（那些在 fk/obs/tau_anchor/state_machine 里）。
 """
@@ -18,7 +19,8 @@ from std_msgs.msg import Bool, Float64MultiArray
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from hittrack import config as C
-from hittrack.pure_import import load_compute_joint_delta_target, load_plan_hit_reference
+from hittrack.pure_import import load_compute_joint_delta_target
+from hittrack.reference_planner_np import plan_hit_reference
 from hittrack.state_machine import HitTrackStateMachine
 
 try:
@@ -40,9 +42,6 @@ class _Callbacks:
         msg.data = [float(v) for v in target_list]
         self._n._pub_action.publish(msg)
 
-    def publish_enable(self, flag):
-        self._n._pub_enable.publish(Bool(data=bool(flag)))
-
     def publish_reset(self):
         self._n._pub_reset.publish(Bool(data=True))
 
@@ -51,18 +50,18 @@ class _Callbacks:
 
 
 class HitTrackDeployNode(Node):
-    def __init__(self, *, policy):
+    def __init__(self, *, policy, recorder=None):
         super().__init__("hittrack_deploy")
         self._pub_action = self.create_publisher(Float64MultiArray, C.TOPIC_MODEL_ACTION, 10)
-        self._pub_enable = self.create_publisher(Bool, C.TOPIC_ENABLE, 10)
         self._pub_reset = self.create_publisher(Bool, C.TOPIC_RESET, 10)
 
         self._sm = HitTrackStateMachine(
             policy=policy,
-            plan_fn=load_plan_hit_reference(),
+            plan_fn=plan_hit_reference,
             cjdt_fn=load_compute_joint_delta_target(),
             callbacks=_Callbacks(self),
             now_fn=self._now,
+            recorder=recorder,
         )
         self._last_joint_time = None
 
@@ -76,8 +75,9 @@ class HitTrackDeployNode(Node):
                 "pingpong_kalman.msg.PredictedHit 不可用——已跳过预测订阅（纯链路冒烟降级）。"
                 "真机联调前请先 source pingpong_kalman 工作区。")
 
-        self.create_timer(C.WATCHDOG_PERIOD_S, self._on_watchdog)  # 时间-housekeeping + 心跳看门狗
+        # self.create_timer(C.WATCHDOG_PERIOD_S, self._on_watchdog)  # 时间-housekeeping + 心跳看门狗
         self._sm.on_startup()
+        self._joint_name_warned = False
 
     def _now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -88,19 +88,37 @@ class HitTrackDeployNode(Node):
         try:
             q = [msg.position[index[name]] for name in C.RIGHT_ARM_JOINT_NAMES]
         except KeyError:
-            # 反馈里缺右臂关节名（可能是别的关节组的消息）——忽略本帧
+            # 反馈里缺右臂关节名——名字不匹配则整帧被丢，_q 恒为 None，发球门控会卡死。
+            # 一次性告警把这类静默失效暴露出来（否则心跳看门狗也不会触发，无任何提示）。
+            if not self._joint_name_warned:
+                self._joint_name_warned = True
+                self.get_logger().warn(
+                    f"/right_joint_states 关节名不匹配，本帧被丢弃：收到 {list(msg.name)}，"
+                    f"期望包含 {C.RIGHT_ARM_JOINT_NAMES}（config.RIGHT_ARM_JOINT_NAMES）")
             return
+        # 电机反馈转矩（effort）：与 q 同帧同名对齐，仅供录制/诊断，不进 obs。
+        # 真机 JointState 可能不带 effort（空数组或长度不一致）→ 传 None，录制填 NaN。
+        tau_motor = None
+        if msg.effort is not None and len(msg.effort) == len(msg.name):
+            try:
+                tau_motor = [float(msg.effort[index[name]]) for name in C.RIGHT_ARM_JOINT_NAMES]
+            except (KeyError, IndexError):
+                tau_motor = None
         now = self._now()
         self._last_joint_time = now
-        self._sm.on_joint_state(q, now)
+        self._sm.on_joint_state(q, now, tau_motor=tau_motor)
 
     def _on_pred(self, msg):
-        fields = (msg.pred_y, msg.pred_z, msg.pred_vx, msg.pred_vy, msg.pred_vz,
-                  msg.pred_t, bool(msg.valid))
+        # 桌面系 -> 地面系：真机 KF 的 pred_z 以桌面为原点，训练 npz 已 += z_offset。
+        # 在此把同一偏置加回 pred_z（仅 z；y/速度/时间不受影响），下游全部地面系。
+        fields = (msg.pred_y, msg.pred_z + C.KF_Z_OFFSET, msg.pred_vx, msg.pred_vy,
+                  msg.pred_vz, msg.pred_t, bool(msg.valid))
         self._sm.on_pred(fields, self._now())
 
     def _on_ball_pos(self, msg: PoseStamped):
-        self._sm.on_ball_pos(msg.pose.position.x)
+        p = msg.pose.position
+        # x 用于门控（不偏移）；z 桌面系 -> 地面系与 pred 对齐（录制/诊断一致）。
+        self._sm.on_ball_pos(p.x, p.y, p.z + C.KF_Z_OFFSET)
 
     def _on_kalman_reset(self, msg: Bool):  # 任何消息都当"新发球"触发（data 值防御性处理）
         self._sm.on_kalman_reset()

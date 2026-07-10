@@ -11,12 +11,13 @@ Why this script exists (see design doc §8 "策略导出缺口"):
     NOT a callable — reconstructing it needs the rsl-rl / isaaclab stack, which the deploy node
     (system python, torch only) does not have.
   * ``play_hittrack.py`` loads such a checkpoint correctly (it calls ``handle_deprecated_rsl_rl_cfg``
-    to migrate the legacy cfg; the generic ``play.py`` dies with ``KeyError: 'class_name'`` here),
-    but does not export. ``play.py`` exports but can't load this cfg. This script combines the two:
-    load exactly like ``play_hittrack.py`` → export exactly like ``play.py``.
-  * ``export_policy_as_jit(..., normalizer=...)`` folds the ``empirical_normalization`` running
-    stats into the traced forward pass, so the deploy node feeds RAW 68-dim obs and gets actions,
-    with no normalizer bookkeeping and no rsl-rl dependency at runtime.
+    to migrate the legacy cfg; the generic ``play.py`` dies with ``KeyError: 'class_name'`` here).
+  * The installed rsl-rl-lib (5.x) keeps observation normalization *inside* the actor ``MLPModel``
+    (``obs_normalizer``), not as a separate object — so ``OnPolicyRunner.export_policy_to_jit`` /
+    ``export_policy_to_onnx`` already trace a flat-tensor-in/flat-tensor-out module with the
+    normalizer baked in. This script just loads the checkpoint (the ``play_hittrack.py`` way) and
+    calls those built-in exporters, so the deploy node feeds RAW 68-dim obs and gets actions, with
+    no normalizer bookkeeping and no rsl-rl dependency at runtime.
 
 Run in the conda isaac env (python 3.11 + isaaclab + rsl-rl):
     source /home/woan/miniforge3/etc/profile.d/conda.sh 2>/dev/null || \
@@ -56,12 +57,7 @@ import os  # noqa: E402
 import gymnasium as gym  # noqa: E402
 import isaaclab_tasks  # noqa: F401, E402
 from isaaclab.utils.assets import retrieve_file_path  # noqa: E402
-from isaaclab_rl.rsl_rl import (  # noqa: E402
-    RslRlVecEnvWrapper,
-    export_policy_as_jit,
-    export_policy_as_onnx,
-    handle_deprecated_rsl_rl_cfg,
-)
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg  # noqa: E402
 from isaaclab_tasks.utils import get_checkpoint_path  # noqa: E402
 from rsl_rl.runners import OnPolicyRunner  # noqa: E402
 
@@ -92,23 +88,13 @@ def main():
     print(f"[EXPORT] loading PPO checkpoint: {resume_path}")
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     runner.load(resume_path)
+    runner.alg.eval_mode()
 
-    # --- extract the policy net + normalizer, export like play.py ---
-    try:
-        policy_nn = runner.alg.policy          # rsl-rl 2.3+
-    except AttributeError:
-        policy_nn = runner.alg.actor_critic    # rsl-rl 2.2 and below
-
-    if hasattr(policy_nn, "actor_obs_normalizer"):
-        normalizer = policy_nn.actor_obs_normalizer
-    elif hasattr(policy_nn, "student_obs_normalizer"):
-        normalizer = policy_nn.student_obs_normalizer
-    else:
-        normalizer = None
-
+    # --- export: OnPolicyRunner's own exporters already trace a flat-tensor MLP with the
+    # obs_normalizer baked in (see rsl_rl.models.mlp_model._TorchMLPModel.forward). ---
     export_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_dir, filename="policy.onnx")
+    runner.export_policy_to_jit(export_dir, filename="policy.pt")
+    runner.export_policy_to_onnx(export_dir, filename="policy.onnx")
     print(f"[EXPORT] wrote {export_dir}/policy.pt (obs=68 -> action=7, normalizer baked in) + policy.onnx")
 
     env.close()

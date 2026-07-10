@@ -9,14 +9,17 @@ from __future__ import annotations
 # 右臂关节 / 姿态 / 限位
 # ---------------------------------------------------------------------------
 
+# 真机 armcontrol 在 /right_joint_states 上发布的关节名（a1_r.urdf 提取，按顺序 1..7，
+# 与训练侧 joint_yb_1..7 一一对应）。名字必须与真机消息逐字相等，否则 ros_node 按名取值时
+# KeyError→整帧被丢→_q 恒为 None→发球门控卡在 "no joint feedback yet"。
 RIGHT_ARM_JOINT_NAMES: list[str] = [
-    "joint_yb_1",
-    "joint_yb_2",
-    "joint_yb_3",
-    "joint_yb_4",
-    "joint_yb_5",
-    "joint_yb_6",
-    "joint_yb_7",
+    "joint1-a1_r",
+    "joint2-a1_r",
+    "joint3-a1_r",
+    "joint4-a1_r",
+    "joint5-a1_r",
+    "joint6-a1_r",
+    "joint7-a1_r",
 ]
 
 DEFAULT_JOINT_POS: list[float] = [1.769, -0.762, -1.863, 1.445, 0.206, -0.827, 1.043]
@@ -44,6 +47,18 @@ HITTRACK_TARGET_XYZ: tuple[float, float, float] = (0.685, 0.0, 0.76)
 HIT_RESTITUTION: float = 0.9
 POST_MARGIN_S: float = 0.12
 
+# ---------------------------------------------------------------------------
+# 坐标系适配：真机 KF 的 z 原点在桌面，仿真/训练在地面
+# ---------------------------------------------------------------------------
+# 真机 Kalman 节点发布的球位/预测 z 以【桌面】为原点；训练侧参考数据由
+# bake_hittrack_references.py 用 --z-offset 把桌面系抬到【地面】系烘焙进 npz
+# （mocap_z/kf_z/kf_pred_z 全部 += z_offset）。policy 因此在地面系里学习。
+# 部署必须在 KF 入口把同一个偏置加回 pred_z / ball_z，否则整条球观测（p_ref/
+# v_ref/n_ref/hit_ref_pos_error）会整体低约 0.73m —— obs 结构性错误。
+# 值取【训练 bake 实际使用的 0.73】(serve_gen bake 命令未传 --z-offset，用 argparse
+# 默认 0.73)，为的是与 policy 学到的坐标系对齐，而非还原物理真实桌高(标定 ~0.714)。
+KF_Z_OFFSET: float = 0.73
+
 # 仅供参考 / 降级发布用，不用于 obs
 READY_JOINT_POS: list[float] = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.094]
 
@@ -52,8 +67,8 @@ READY_JOINT_POS: list[float] = [1.377, -0.639, 1.660, -1.738, 0.118, 0.721, -2.0
 # ---------------------------------------------------------------------------
 
 RESET_X_GATE: tuple[float, float] = (0.7, 1.4)
-PRED_LOSS_TOLERANCE_S: float = 0.08  # 预测丢失容忍窗口
-JOINT_STATE_WATCHDOG_S: float = 0.2  # 反馈心跳看门狗阈值
+PRED_LOSS_TOLERANCE_S: float = 0.20  # 预测丢失容忍窗口
+JOINT_STATE_WATCHDOG_S: float = 1.0  # 反馈心跳看门狗阈值
 WATCHDOG_PERIOD_S: float = 0.1       # 看门狗 / 时间-housekeeping 定时器周期
 READY_RETURN_TIMEOUT_S: float = 1.5  # 发归位信号后等待固定超时
 
