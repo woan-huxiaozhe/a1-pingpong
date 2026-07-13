@@ -267,7 +267,7 @@ def update_hit_track_state(
     if bool(at_hit.any()):
         # Fetch the racket state lazily -- only needed at the hit step -- so the per-step cursor
         # advance stays Isaac-free (the deferred observations import pulls in isaaclab/USD).
-        from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import RACKET_BODY_NAME
+        from unitree_rl_lab.tasks.a1_pingpong_hittrack.env_cfg import RACKET_BODY_NAME
         from unitree_rl_lab.tasks.table_tennis_sac.mdp.observations import racket_ang_vel, racket_normal
 
         if racket_pos is None or racket_vel is None:

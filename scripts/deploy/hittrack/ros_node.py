@@ -75,7 +75,9 @@ class HitTrackDeployNode(Node):
                 "pingpong_kalman.msg.PredictedHit 不可用——已跳过预测订阅（纯链路冒烟降级）。"
                 "真机联调前请先 source pingpong_kalman 工作区。")
 
-        # self.create_timer(C.WATCHDOG_PERIOD_S, self._on_watchdog)  # 时间-housekeeping + 心跳看门狗
+        # 固定 100Hz 控制 tick（周期 STEP_DT=0.01）：推理/发布不再挂在 /right_joint_states 回调上，
+        # 而由本定时器驱动，消除 tick_dt 抖动、对齐训练的 10ms 步进。joint_states 回调降级为纯 q 缓存。
+        self._control_timer = self.create_timer(C.STEP_DT, self._on_control_tick)
         self._sm.on_startup()
         self._joint_name_warned = False
 
@@ -123,8 +125,11 @@ class HitTrackDeployNode(Node):
     def _on_kalman_reset(self, msg: Bool):  # 任何消息都当"新发球"触发（data 值防御性处理）
         self._sm.on_kalman_reset()
 
-    def _on_watchdog(self):
+    def _on_control_tick(self):
+        """固定 100Hz 控制 tick：驱动状态机 on_control_tick（TRACKING 推理/发布、RETURNING 归位超时）。
+        额外做反馈心跳看门狗——tick 不再依赖 /right_joint_states 到达，若反馈长时间未到必须主动中断，
+        否则会拿过期 q 持续推理。"""
         now = self._now()
-        self._sm.on_tick(now)  # RETURNING 归位超时推进，与关节反馈是否到达无关（防卡死）
         if self._last_joint_time is not None and now - self._last_joint_time > C.JOINT_STATE_WATCHDOG_S:
-            self._sm.on_watchdog(now)
+            self._sm.on_watchdog(now)     # TRACKING 中则中断到安全态并发 reset 归位
+        self._sm.on_control_tick(now)

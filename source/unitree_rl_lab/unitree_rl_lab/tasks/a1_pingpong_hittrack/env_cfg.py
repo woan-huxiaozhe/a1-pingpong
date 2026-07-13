@@ -25,6 +25,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp as mdp
 from unitree_rl_lab.assets.robots.a1 import A1_ARM_VELOCITY
@@ -37,15 +38,15 @@ from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
 # scene class itself comes from the forehand base task -- the SAC scene was a no-op `pass`
 # subclass of it, so this drops the table_tennis_sac.env_cfg dependency entirely. ---
 ROBOT_SIDE = -1  # +1 = robot at +X, -1 = robot at -X (flipped); A1 runs flipped
-RACKET_BODY_NAME = "Link_yb_paddle"
+RACKET_BODY_NAME = "right_paddle"
 RIGHT_ARM_JOINT_NAMES = [
-    "joint_yb_1",
-    "joint_yb_2",
-    "joint_yb_3",
-    "joint_yb_4",
-    "joint_yb_5",
-    "joint_yb_6",
-    "joint_yb_7",
+    "r1",
+    "r2",
+    "r3",
+    "r4",
+    "r5",
+    "r6",
+    "r7",
 ]
 TABLE_Z = 0.76  # table surface height (m)
 OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0.5*(0+1.37), ROBOT_SIDE=-1
@@ -205,6 +206,25 @@ REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_
 REACH_Z = (0.7, 1.5)
 JOINT_POS_DELTA_HISTORY_LENGTH = 5
 
+# --- Sim-to-real domain randomization (2026-07-10) ---
+# The real A1 joint encoders are noisy; a policy trained on CLEAN sim joint state learns a high
+# local gain w.r.t. joint_pos and AMPLIFIES that noise into per-step action jitter on hardware.
+# Train the ACTOR with additive joint-state observation noise so it learns a locally smooth
+# (noise-robust) mapping; the CRITIC keeps a CLEAN (privileged) view for a stable value target
+# (mirrors the existing noisy-actor / *_clean-critic split). Bounded-uniform to match the forehand
+# DR precedent (Unoise on joint_pos there = +/-0.01 rad).
+JOINT_POS_OBS_NOISE = 0.005        # rad (~0.57 deg): raw joint-pos encoder noise (actor only)
+JOINT_POS_DELTA_OBS_NOISE = 0.002 # rad: smaller -- the delta-history is the actor's velocity proxy;
+# it is the channel most directly tied to jitter, so it IS corrupted, but at half the pos noise to
+# keep the low-speed signal-to-noise usable (independent per-term samples, not the coupled encoder
+# stream -- the standard IsaacLab approximation).
+# PD gain randomization: multiply each ARM joint's stiffness/damping by U(0.9,1.1) at every reset
+# (the real K/D differ from the sim nominal). Uses the built-in mdp.randomize_actuator_gains which,
+# for the A1's IMPLICIT actuators, scales from default_joint_{stiffness,damping} (no cross-reset
+# drift) AND writes the gains into the PhysX solver -- an in-place actuator.stiffness edit alone is a
+# NO-OP on implicit-actuator dynamics (PhysX computes the PD from gains set once at init).
+PD_GAIN_RAND_RANGE = (0.9, 1.1)
+
 # Curriculum (3): baked serve source (ON by default; the curriculum (1)/(2) synthetic box is unused
 # while this is True). The reset loads `HITTRACK_BAKED_PATH` (a bake_hittrack_references.py npz) and
 # samples one recorded serve per env. Default = KDE-synthetic TRAIN set (933 serves densified from 50
@@ -212,8 +232,8 @@ JOINT_POS_DELTA_HISTORY_LENGTH = 5
 # "hittrack_references_eval_real.npz" (the 15 held-out real serves) and measure hit success;
 # "hittrack_references.npz" is the original 72 real serves.
 HITTRACK_USE_BAKED = True
-HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
-# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real.npz")
+# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
+HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real.npz")
 
 
 @configclass
@@ -255,6 +275,7 @@ class ObservationsCfg:
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES)},
+            noise=Unoise(n_min=-JOINT_POS_OBS_NOISE, n_max=JOINT_POS_OBS_NOISE),
         )
         joint_pos_delta_history = ObsTerm(
             func=mdp.joint_pos_delta_history,
@@ -262,6 +283,7 @@ class ObservationsCfg:
                 "asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES),
                 "history_length": JOINT_POS_DELTA_HISTORY_LENGTH,
             },
+            noise=Unoise(n_min=-JOINT_POS_DELTA_OBS_NOISE, n_max=JOINT_POS_DELTA_OBS_NOISE),
         )
         # noisy model-derived end-effector reference command [p_ref, v_ref, n_ref, tau] (deployable)
         hit_reference_command = ObsTerm(func=mdp.hit_reference_command)
@@ -272,7 +294,9 @@ class ObservationsCfg:
         last_action = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
-            self.enable_corruption = False
+            # Actor sees the noisy, deployable joint state (Unoise terms above) so it learns a
+            # noise-robust mapping -> less on-hardware jitter. Critic overrides this to False.
+            self.enable_corruption = True
             self.concatenate_terms = True
 
     @configclass
@@ -287,6 +311,13 @@ class ObservationsCfg:
         # clean (privileged) reference command + tau_true
         hit_reference_command_clean = ObsTerm(func=mdp.hit_reference_command_clean)
         hit_ref_vel_error = ObsTerm(func=mdp.hit_ref_vel_error, params={"racket_body_name": RACKET_BODY_NAME})
+
+        def __post_init__(self):
+            super().__post_init__()
+            # Critic is privileged: keep ALL its inputs CLEAN (the joint-state noise cfgs inherited
+            # from ActorCfg are only applied when the group's corruption is enabled). A clean value
+            # target is standard for asymmetric actor-critic and avoids a noisier critic.
+            self.enable_corruption = False
 
     policy: ActorCfg = ActorCfg()
     critic: CriticCfg = CriticCfg()
@@ -415,6 +446,24 @@ class EventCfg:
         interval_range_s=(STEP_DT, STEP_DT),
         params={"success_pos_thresh": SUCCESS_POS, "success_vel_thresh": SUCCESS_VEL},
     )
+    # PD-gain domain randomization (sim-to-real): per-joint scale of the arm's stiffness/damping by
+    # U(0.9,1.1) at each reset. Built-in term -> for the implicit A1 actuators it both scales from
+    # the nominal default gains (no drift) AND writes the result into PhysX (see PD_GAIN_RAND_RANGE).
+    # Scoped to the 7 arm joints via joint_names (other actuators are skipped: empty intersection).
+    # NOTE: for implicit actuators this does a CPU sync of the gain tensors on every reset; if it
+    # dents throughput, switch mode to "startup" (fixed per-env gains, still 2048 samples across the
+    # range) instead of "reset".
+    randomize_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=RIGHT_ARM_JOINT_NAMES),
+            "stiffness_distribution_params": PD_GAIN_RAND_RANGE,
+            "damping_distribution_params": PD_GAIN_RAND_RANGE,
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
 
 
 @configclass
@@ -448,7 +497,7 @@ class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
         if ROBOT_SIDE < 0:
             self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         joint_pos = dict(self.scene.robot.init_state.joint_pos)
-        joint_pos["joint_lift"] = READY_LIFT_POS
+        joint_pos["sj"] = READY_LIFT_POS
         self.scene.robot.init_state.joint_pos = joint_pos
         # Curriculum (3): switch the reference source to the baked real serves (lazy-loaded
         # on the first reset onto env.device).
@@ -462,3 +511,6 @@ class HitTrackPlayEnvCfg(HitTrackEnvCfg):
         self.scene.num_envs = 1
         self.viewer.eye = (-0.5, -1.4, 1.4)
         self.viewer.lookat = (-1.0, 0.0, 1.0)
+        # Deterministic playback / deploy-prep: no observation corruption, nominal PD gains.
+        self.observations.policy.enable_corruption = False
+        self.events.randomize_gains = None

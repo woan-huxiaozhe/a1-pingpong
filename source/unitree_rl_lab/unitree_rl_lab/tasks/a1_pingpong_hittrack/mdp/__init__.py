@@ -11,6 +11,10 @@ no longer defines any HitTrack term.
 
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 
+# Explicit re-export of the built-in class-based DR term (the wildcard above already pulls it in,
+# but naming it makes it visible to static tooling and documents the sim-to-real PD randomization).
+from isaaclab.envs.mdp.events import randomize_actuator_gains  # noqa: F401
+
 # Reuse the generic / Catch-shared terms (racket_pos/vel/ang_vel/normal/axes, joint_pos_delta_history,
 # JointDeltaTargetActionCfg, joint_acc/jerk/limit/effort regularizers, reset_robot_to_ready_pose,
 # sac_time_out, joint_state_nan, ...). Private helpers (``_racket_body_state``) are imported

@@ -1,5 +1,5 @@
-"""纯 torch 正向运动学：a1_r.urdf 的 7 关节齐次链 + 实测校准 T_mount/T_paddle -> 世界系桨面位姿。
-常数见 config.py（已用仿真两组独立关节角交叉验证，<1e-4）。无 isaaclab / RBDL 依赖。"""
+"""纯 torch 正向运动学：X1_URDF_V1_2 右臂 r1..r7 的 7 关节齐次链 + T_mount/T_paddle -> 世界系桨面位姿。
+常数见 config.py（T_MOUNT 由新 a1.usd 仿真反解，FK-vs-sim 静态残差 0.48mm）。无 isaaclab / RBDL 依赖。"""
 from __future__ import annotations
 import torch
 from . import config as C

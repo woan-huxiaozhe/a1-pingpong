@@ -37,6 +37,9 @@ class HitTrackStateMachine:
         self._hist = JointDeltaHistory()
         self._prev_target = None       # compute_joint_delta_target 的滚动目标
         self._last_action = torch.zeros(7, dtype=torch.float32)
+        self._act_filt = None          # 原始 act 一阶低通(方案B)的滚动状态；None=未初始化/追踪起始
+        self._lpf_enabled = bool(C.ACT_LPF_ENABLED)  # 从 config 读默认(单一来源)；可在构造后按实例覆盖
+        self._lpf_alpha = float(C.ACT_LPF_ALPHA)
         self._last_activity = 0.0      # 进入 TRACKING 或最近一次 valid 预测的时刻（丢失计时基准）
         self._return_start = 0.0
         self._first_infer = True       # 首个推理 tick = 训练 reset step（delta 历史置零）
@@ -88,24 +91,28 @@ class HitTrackStateMachine:
             self._last_pred = (float(py), float(pz), float(vx), float(vy), float(vz), float(pred_t))
 
     def on_joint_state(self, q, now, tau_motor=None):
-        """方案 C 的 tick 源。tau_motor=同帧电机反馈转矩[7]（effort，录制用，真机无则 None）。"""
+        """缓存最近一帧真实关节角/转矩。tick 已改为固定 100Hz 定时器(on_control_tick)驱动，本回调
+        不再直接触发推理——消除随 /right_joint_states 到达抖动的 tick_dt(实测 1.6–24.7ms)，让 obs 的
+        joint_pos_delta_history 与 tau 外推都按训练的固定 10ms 步进。tau_motor=同帧电机反馈转矩[7]。
+        仍在 RETURNING 顺带推进归位超时(与定时器互为冗余，反馈在时也能归位)。"""
         self._q = torch.as_tensor(q, dtype=torch.float32)
         self._tau_motor = tau_motor
         if self.state == "RETURNING":
             self._maybe_finish_return(now)
-            return
-        if self.state == "TRACKING":
+
+    def on_control_tick(self, now):
+        """固定 100Hz 控制 tick（ROS 定时器驱动，周期 STEP_DT）：与 /right_joint_states 到达节奏解耦。
+        TRACKING：用最近缓存的 self._q 组 68 维 obs→policy→后处理→发布关节目标；
+        RETURNING：推进归位超时；其余状态空转。"""
+        if self.state == "RETURNING":
+            self._maybe_finish_return(now)
+        elif self.state == "TRACKING":
             self._track_tick(now)
 
     def on_watchdog(self, now):
         """反馈心跳丢失（/right_joint_states 长时间未到）→ 若在 TRACKING 立即中断到安全态。"""
         if self.state == "TRACKING":
             self._interrupt(now, "joint-state feedback watchdog")
-
-    def on_tick(self, now):
-        """时间驱动 housekeeping（ROS 看门狗定时器调用，与关节反馈无关）：即使
-        /right_joint_states 停止，也让 RETURNING 归位超时照常推进，避免卡在 RETURNING。"""
-        self._maybe_finish_return(now)
 
     # ---- 内部 ----
 
@@ -118,6 +125,7 @@ class HitTrackStateMachine:
         self._hist.reset(self._q)
         self._prev_target = self._q.clone()
         self._last_action = torch.zeros(7, dtype=torch.float32)
+        self._act_filt = None          # 每次进入追踪清零低通状态，首个推理 tick 直接采用 raw(无起跳)
         self._last_activity = self._now_fn()
         self._first_infer = True
         self._episode += 1
@@ -157,8 +165,18 @@ class HitTrackStateMachine:
         if not bool(torch.isfinite(raw).all()):
             self._interrupt(now, "non-finite action")
             return
+        # 方案B：对【原始 act】做一阶指数低通再送动作接口，压高频抖动。ENABLED=False 或 α>=1
+        # 时 act_cmd 即 raw（逐字节等价旧行为）。首个 tick self._act_filt 直接采用 raw，避免从 0 起跳。
+        if self._lpf_enabled and self._lpf_alpha < 1.0:
+            if self._act_filt is None:
+                self._act_filt = raw.clone()
+            else:
+                self._act_filt = self._lpf_alpha * raw + (1.0 - self._lpf_alpha) * self._act_filt
+            act_cmd = self._act_filt
+        else:
+            act_cmd = raw
         target = self._cjdt_fn(
-            self._q, raw, self._lower, self._upper,
+            self._q, act_cmd, self._lower, self._upper,
             action_scale=self._action_scale,
             previous_target=self._prev_target,
             smoothing=C.SMOOTHING,
@@ -167,6 +185,7 @@ class HitTrackStateMachine:
         self._prev_target = target
         target_list = target.tolist()
         self._cb.publish_action(target_list)
+        # last_action 回灌【未滤波 raw】：训练侧 obs.last_action 记录的是策略原始输出，保持一致。
         self._last_action = raw
         if self._recorder is not None:
             tick_ms = (time.perf_counter() - tick_t0) * 1e3

@@ -12,13 +12,12 @@ from unitree_rl_lab.tasks.table_tennis.mdp.observations import ball_predicted_hi
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
-# Paddle blade geometric center, measured from the Link_yb_paddle body origin in the
-# link-local frame (a1.usd: blade plate 0.15 x 0.02 x 0.25, subtree center at local
-# +Z 0.045). The body origin sits ~0.045 m below the blade center (toward the lower
-# edge / handle side), which is why a zero offset rewards "handle" contact. Shifting
-# the racket reference point to +0.045 makes proximity / approach / hit all radiate
-# from the true paddle center. Face normal is local +Y, so the in-plane offset is +Z.
-RACKET_OFFSET_Z = 0.045
+# Paddle-center offset from the racket body origin, along the body-local +Z (face normal is
+# local +Y). New a1.usd = X1_URDF_V1_2: the racket body is `right_paddle` and its origin already
+# sits at the striking-face center -- the measured rubber-face centroid is only +9 mm along +Z
+# (the old 0.045 was the mesh bounding-box center, ~36 mm off toward a mount stub). Set to 0 so
+# the paddle reference point IS the body origin. Shared by the HitTrack and SAC catch tasks.
+RACKET_OFFSET_Z = 0.0
 
 
 def _racket_body_state(env: ManagerBasedEnv, racket_body_name: str):
