@@ -1,0 +1,88 @@
+scripts/deploy/hittrack/config.py
+  s_f16424c11a4b63::t_6ed03ab8535e5b 41-51,53
+  h_c9d7340f891f95 52
+  s_ad5363ef4952a2::t_9c30fe46dac5c4 89-93,97,99,101,110,112-113,115-121
+  s_ad5363ef4952a2::t_0e82da7f713842 13
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/__init__.py
+  s_ecb1a4a3d75f22::t_18651f24322782 14-17
+scripts/deploy/hittrack/ros_node.py
+  s_f16424c11a4b63::t_4a2afd64f01473 128-131,134-135
+  s_f16424c11a4b63::t_f726d0d4e8949d 78-80
+scripts/deploy/hittrack/state_machine.py
+  s_f16424c11a4b63::t_2c9a9a12b857c3 40-42
+  s_f16424c11a4b63::t_7679f6dee41b2e 128
+  s_f16424c11a4b63::t_de61ca7f7abe91 94-97,102-109
+  s_f16424c11a4b63::t_3fa529e02a6bfb 168-177,179,188
+scripts/deploy/hittrack/fk.py
+  s_ad5363ef4952a2::t_6a8d593e0c189e 1-2
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_ad5363ef4952a2::t_e4f5db2ffeed96 41,43-49
+  h_c9d7340f891f95 216-217,235
+  s_ecb1a4a3d75f22::t_8b7910081f651b 278,286
+  s_ecb1a4a3d75f22::t_3b37944d0aa7b3 28
+  s_ecb1a4a3d75f22::t_a3d928399868c6 315-321
+  s_ad5363ef4952a2::t_55a6747b38d017 500
+  s_ecb1a4a3d75f22::t_b7e8081288ac56 514-516
+  s_ecb1a4a3d75f22::t_bbb41580683ee5 297-299
+  s_ecb1a4a3d75f22::t_f39640351f3185 209-215,218-227
+  s_ecb1a4a3d75f22::t_d409c5b4c6e4e9 449-466
+  s_ad5363ef4952a2::t_439afa2b1a505c 236
+source/unitree_rl_lab/unitree_rl_lab/assets/robots/a1.py
+  s_ad5363ef4952a2::t_24df4ed1587cee 68-82
+  s_ad5363ef4952a2::t_d629b69e781408 15-16
+  s_ad5363ef4952a2::t_2b1066cc1824a4 89,96,102-103,109-110,116-117
+  s_ad5363ef4952a2::t_e240f322cb1ea2 30,34,37-38,41-42
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/mdp/reference_commands.py
+  s_ad5363ef4952a2::t_0f536ac6a9d451 270
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/observations.py
+  s_ad5363ef4952a2::t_1d2fd12edecbc4 15-20
+tests/test_deploy_state_machine.py
+  s_f16424c11a4b63::t_c35f82a31bbb5b 83
+  s_f16424c11a4b63::t_7db887c5bdc70e 130
+  s_f16424c11a4b63::t_c5c1804b496614 58
+  s_f16424c11a4b63::t_1a4f51754bdebd 152
+  s_f16424c11a4b63::t_cc3ca5b1c6b583 159,163
+  s_f16424c11a4b63::t_e58a7d5b65f0b2 180-205,207-219
+  s_f16424c11a4b63::t_ec7f8124d26cb7 206
+  s_f16424c11a4b63::t_8499e399cd0811 74
+  s_f16424c11a4b63::t_42a523d8e92814 172
+  s_f16424c11a4b63::t_308329ef93d775 102,105
+  s_f16424c11a4b63::t_dd537c922e7530 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "38aea844171745958df85614e68903ec6e944300",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_ad5363ef4952a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5fa7c54b-d045-48d8-8e82-3474dfdac426",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_ecb1a4a3d75f22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35baf0e3-e723-4515-9aac-97ab47131420",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_f16424c11a4b63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06455cf9-ccd9-49b6-9dbb-d81f2f3f6b20",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
