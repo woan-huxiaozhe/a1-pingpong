@@ -227,13 +227,15 @@ PD_GAIN_RAND_RANGE = (0.9, 1.1)
 
 # Curriculum (3): baked serve source (ON by default; the curriculum (1)/(2) synthetic box is unused
 # while this is True). The reset loads `HITTRACK_BAKED_PATH` (a bake_hittrack_references.py npz) and
-# samples one recorded serve per env. Default = KDE-synthetic TRAIN set (933 serves densified from 50
-# real anchors, held out 16). To VALIDATE generalization, point this at
-# "hittrack_references_eval_real.npz" (the 15 held-out real serves) and measure hit success;
-# "hittrack_references.npz" is the original 72 real serves.
+# samples one recorded serve per env. Default = KDE-synthetic TRAIN set from the CAMERA data split
+# (810 synth serves densified from 186 camera-fit anchors, 62 serves held out; serve_gen pipeline on
+# data/trajectory_csv_0709_merge, 2026-07-13). To VALIDATE generalization, switch to the eval line
+# below (hittrack_references_eval_real_camera.npz: 21 held-out camera serves, fit-rolled to the -1.44
+# hit plane) and measure hit success. The *_camera.npz sit next to this file, gitignored like the
+# legacy 0629 mocap npz (hittrack_references_{train_synth,eval_real}.npz).
 HITTRACK_USE_BAKED = True
-# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
-HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real.npz")
+HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth_camera.npz")
+# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real_camera.npz")
 
 
 @configclass
