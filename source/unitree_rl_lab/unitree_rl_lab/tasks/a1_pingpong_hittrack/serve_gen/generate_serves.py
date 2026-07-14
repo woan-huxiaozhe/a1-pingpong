@@ -100,6 +100,29 @@ def _gen_one(pos0_mm, v0_mm, gcfg, serve_id, nm, rng, kf_cfg, fps, horizon_s, po
     return rows
 
 
+def _load_replay_latents(fit_path, ids):
+    """Per-serve fitted latents for exactly the serve_ids in `ids` (order = ids),
+    skipping any id absent from the fit npz. Used by --replay to reproduce held-out
+    serves from their OWN fit (no KDE, no jitter)."""
+    d = np.load(fit_path, allow_pickle=True)
+    sid = d["serve_id"].astype(int)
+    idx = {int(s): i for i, s in enumerate(sid)}
+    out = []
+    for want in ids:
+        i = idx.get(int(want))
+        if i is None:
+            continue
+        out.append({
+            "serve_id": int(want),
+            "pos0_mm": np.asarray(d["pos0_mm"][i], dtype=float),
+            "v0_mm_s": np.asarray(d["v0_mm_s"][i], dtype=float),
+            "drag": float(d["drag"][i]),
+            "alpha_z": float(d["alpha_z"][i]),
+            "alpha_xy": float(d["alpha_xy"][i]),
+        })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fit", default="fitted_serves.npz")
@@ -117,7 +140,43 @@ def main():
                     help="fraction of real serves held OUT of the KDE anchors (validate on unseen serves)")
     ap.add_argument("--holdout-seed", type=int, default=0, help="seed for the deterministic holdout split")
     ap.add_argument("--holdout-out", default=None, help="write held-out serve_ids here (json) for eval baking")
+    ap.add_argument("--replay", action="store_true",
+                    help="reproduce EXACTLY the held-out serves from their own fit (eval set); no KDE/jitter")
+    ap.add_argument("--replay-ids", default=None,
+                    help="holdout json to replay (default: --holdout-out path)")
     args = ap.parse_args()
+
+    if args.replay:
+        import json
+        ids_path = args.replay_ids or args.holdout_out
+        if not ids_path:
+            raise SystemExit("--replay needs --replay-ids (or --holdout-out) pointing at a holdout json")
+        with open(ids_path) as f:
+            ids = json.load(f)["holdout_ids"]
+        latents = _load_replay_latents(args.fit, ids)
+        nm = calibrate(load_dir(args.data_dir))
+        rng = np.random.default_rng(args.seed)
+        kf_cfg = default_config()
+        os.makedirs(args.out_dir, exist_ok=True)
+        rows_all = []
+        kept = 0
+        for lat in latents:
+            gcfg = ball_config(lat["drag"], lat["alpha_z"], lat["alpha_xy"])
+            rows = _gen_one(lat["pos0_mm"], lat["v0_mm_s"], gcfg, lat["serve_id"], nm, rng, kf_cfg,
+                            args.fps, horizon_s=1.6, post_margin_s=0.12)
+            if rows is None:
+                continue
+            rows_all.extend(rows)
+            kept += 1
+        path = os.path.join(args.out_dir, "synth_000.csv")
+        with open(path, "w") as f:
+            f.write(HEADER + "\n")
+            for r in rows_all:
+                f.write(",".join(str(x) for x in r) + "\n")
+        print(f"replay: emitted {kept}/{len(latents)} held-out serves -> {args.out_dir}")
+        print(f"next: python bake_hittrack_references.py --data-dir {args.out_dir} "
+              f"--out hittrack_references_eval_real.npz --hit-plane-x {BAKE_PLANE_X}")
+        return
 
     holdout = None
     if args.holdout_frac > 0.0:
