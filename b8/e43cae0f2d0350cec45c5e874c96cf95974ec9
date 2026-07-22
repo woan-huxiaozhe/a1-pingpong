@@ -1,0 +1,53 @@
+source/unitree_rl_lab/unitree_rl_lab/tasks/a1_pingpong_hittrack/env_cfg.py
+  s_fa0c91c97102d6::t_a2b9f959d3a8aa 32-35
+  s_fa0c91c97102d6::t_7132279a6cdaf7 20
+  s_fa0c91c97102d6::t_0bc272d9dce962 276-281
+  s_a283dc84e95c23::t_0a897ca87eeeba 60-63
+  s_fa0c91c97102d6::t_50f593ff0f14f9 517-526,531-533
+  h_c9d7340f891f95 208,243,245
+  s_fa0c91c97102d6::t_5d83a89eec76ab 516,527-530,534
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis/robots/a1/backhand/env_cfg.py
+  s_2cba2e4e8e2c63::t_f843b36aca72d0 213-214
+  s_2cba2e4e8e2c63::t_fc9686b26fa1ae 318-327
+source/unitree_rl_lab/unitree_rl_lab/tasks/table_tennis_sac/mdp/actions.py
+  s_fa0c91c97102d6::t_8545334a5607c6 133-136
+  s_fa0c91c97102d6::t_e7c197e341ac2d 45-54
+  s_fa0c91c97102d6::t_d909dc05d73546 98-107,115-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b8e43cae0f2d0350cec45c5e874c96cf95974ec9",
+  "prompts": {},
+  "humans": {
+    "h_c9d7340f891f95": {
+      "author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  },
+  "sessions": {
+    "s_2cba2e4e8e2c63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9006a523-508e-4608-9436-c8175dc685f1",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_a283dc84e95c23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "32fff62d-a0c7-42dd-bf13-a75ecafa557a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    },
+    "s_fa0c91c97102d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d43b7ade-6179-44dc-9275-8ad797ceaf75",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "huxiaozhe <huxiaozhe@onero.com>"
+    }
+  }
+}
