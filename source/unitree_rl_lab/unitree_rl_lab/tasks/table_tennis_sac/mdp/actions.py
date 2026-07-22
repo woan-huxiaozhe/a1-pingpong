@@ -42,6 +42,16 @@ class JointDeltaTargetAction(ActionTerm):
         else:
             self._max_joint_velocity = float(cfg.max_joint_velocity)
 
+        # Sub-step (physics-dt) transport delay of the position target. apply_actions() runs once per
+        # physics sub-step, so a sub-step ring buffer gives sim.dt-granularity delay (5ms @200Hz). Models
+        # the real deploy comms/actuation dead-time (~63ms measured). 0 = disabled (default; SAC unaffected).
+        self._sub_max = int(getattr(cfg, "action_delay_substeps_max", 0))
+        if self._sub_max > 0:
+            self._sub_buffer = self._processed_actions.unsqueeze(1).repeat(1, self._sub_max + 1, 1).clone()
+            self._sub_delay = torch.full(
+                (env.num_envs,), int(cfg.action_delay_substeps_min), dtype=torch.long, device=env.device
+            )
+
     @property
     def action_dim(self) -> int:
         return self._num_joints
@@ -85,7 +95,16 @@ class JointDeltaTargetAction(ActionTerm):
         )
 
     def apply_actions(self):
-        self._robot.set_joint_position_target(self._processed_actions, joint_ids=self._joint_ids)
+        if self._sub_max > 0:
+            # push the current position target into the sub-step ring, apply the one delayed by
+            # self._sub_delay sub-steps (per-env, resampled each reset) -> transport dead-time.
+            self._sub_buffer = torch.roll(self._sub_buffer, 1, dims=1)
+            self._sub_buffer[:, 0] = self._processed_actions
+            idx = self._sub_delay.unsqueeze(-1).unsqueeze(-1).expand(-1, 1, self._num_joints)
+            delayed = self._sub_buffer.gather(1, idx).squeeze(1)
+            self._robot.set_joint_position_target(delayed, joint_ids=self._joint_ids)
+        else:
+            self._robot.set_joint_position_target(self._processed_actions, joint_ids=self._joint_ids)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         if env_ids is None:
@@ -93,6 +112,13 @@ class JointDeltaTargetAction(ActionTerm):
         self._raw_actions[env_ids] = 0.0
         self._processed_actions[env_ids] = self._robot.data.joint_pos[env_ids][:, self._joint_ids]
         self._limit_violation[env_ids] = False
+        if self._sub_max > 0:
+            cur = self._robot.data.joint_pos[env_ids][:, self._joint_ids]
+            self._sub_buffer[env_ids] = cur.unsqueeze(1)   # fill history with the reset pose (no stale target)
+            self._sub_delay[env_ids] = torch.randint(
+                int(self.cfg.action_delay_substeps_min), self._sub_max + 1,
+                (len(env_ids),), device=self._sub_delay.device,
+            )
 
 
 @configclass
@@ -104,3 +130,7 @@ class JointDeltaTargetActionCfg(ActionTermCfg):
     smoothing: float = 0.5
     max_joint_velocity: float | list[float] | None = 6.0
     limit_margin: float = 1.0e-3
+    # Physics-substep (sim.dt) transport delay of the position target. 0 = disabled. Each reset samples
+    # a per-env integer delay in [min, max] sub-steps (5ms @200Hz) for domain randomization.
+    action_delay_substeps_min: int = 0
+    action_delay_substeps_max: int = 0

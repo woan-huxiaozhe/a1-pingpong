@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -28,7 +29,10 @@ from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import unitree_rl_lab.tasks.a1_pingpong_hittrack.mdp as mdp
-from unitree_rl_lab.assets.robots.a1 import A1_ARM_VELOCITY
+from unitree_rl_lab.assets.robots.a1 import (
+    A1_ARM_EFFORT,
+    A1_ARM_VELOCITY,
+)
 from unitree_rl_lab.tasks.table_tennis.robots.a1.forehand.env_cfg import (
     X1TableTennisSceneCfg,
 )
@@ -53,8 +57,10 @@ OPP_TABLE_CENTER_X = 0.685  # opponent half-table center x (landing target); = 0
 # 0.45 standoff (reverted 2026-07-04 from the 0.47 back-move). model_10000 telemetry showed the
 # ready-pose blade already sits behind HIT_PLANE_X, so runway was never the swing-speed bottleneck
 # (the action interface is); the extra 2 cm only shortened far-+y lateral reach (perr_y up to 0.12 on
-# the +y serves) for no velocity gain. FK-verified at base=-1.82: ready blade center = (-1.486, +0.034,
-# +1.032) => 0.046 m BEHIND the plane (positive forward runway; not past it). Back to original standoff.
+# the +y serves) for no velocity gain. FK-verified at base=-1.82 (re-measured 2026-07-13 after the X1
+# USD migration + 07-08 wind-up/pre-tilt ready pose; Isaac == deploy FK to 0.1mm): ready blade center =
+# (-1.555, +0.134, +1.031) => 0.115 m BEHIND the plane (positive forward runway; not past it). Back to
+# original standoff.
 ROBOT_BASE_X = (1.37 + 0.45) * ROBOT_SIDE  # = -1.82; robot base placement
 MAX_JOINT_VELOCITY = [A1_ARM_VELOCITY[name] for name in RIGHT_ARM_JOINT_NAMES]  # = [8,8,8,20,20,20,20]
 
@@ -199,7 +205,7 @@ W_APPROACH_VEL = 10.0     # ~1/3 of W_VEL(30); primary knob -- raise if the wind
 
 SUCCESS_POS = 0.05
 SUCCESS_VEL = 0.2
-REACH_Y = (-0.15, 0.25)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
+REACH_Y = (-0.05, 0.35)  # -0.2,0.2 -> -0.10,0.30: baked-mode reset uses sample_lateral_shift() to
 # draw each serve's y target uniformly from this range (mdp/reference_source.py), so it IS the
 # trained lateral serve range, not just a synthetic-curriculum box. Was symmetric about 0; recenter
 # on the new ready pose's resting blade-center y (~+0.10) so both reach directions are comparable.
@@ -234,9 +240,9 @@ PD_GAIN_RAND_RANGE = (0.9, 1.1)
 # hit plane) and measure hit success. The *_camera.npz sit next to this file, gitignored like the
 # legacy 0629 mocap npz (hittrack_references_{train_synth,eval_real}.npz).
 HITTRACK_USE_BAKED = True
-HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth_camera.npz")
+# HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth_camera.npz")
 # HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_eval_real_camera.npz")
-
+HITTRACK_BAKED_PATH = os.path.join(os.path.dirname(__file__), "hittrack_references_train_synth.npz")
 
 @configclass
 class ActionsCfg:
@@ -267,6 +273,12 @@ class ActionsCfg:
         # train/test mismatch, recovered by retraining).
         smoothing=0.7,
         max_joint_velocity=MAX_JOINT_VELOCITY,
+        # Sim-to-real transport dead-time: real cmd->response is ~63ms (chirp xcorr, freq-independent,
+        # corr 0.994), so delay the position target by 8-18 physics sub-steps (sim.dt=5ms => 40-90ms,
+        # center ~65ms), per-env randomized each reset to cover deploy 40-110ms jitter. Was 0 (sim had
+        # no delay -> policy learned to lead the real arm by ~63ms).
+        action_delay_substeps_min=8,
+        action_delay_substeps_max=18,
     )
 
 
@@ -501,6 +513,25 @@ class HitTrackEnvCfg(ManagerBasedRLEnvCfg):
         joint_pos = dict(self.scene.robot.init_state.joint_pos)
         joint_pos["sj"] = READY_LIFT_POS
         self.scene.robot.init_state.joint_pos = joint_pos
+        # --- Actuator: swap the right arm ImplicitActuator -> IdealPD (explicit PD + effort clip), the
+        # model closest to the real deploy low-level controller (sim-to-real). Gains set to the REAL
+        # deploy anchors (kp 300/120, kd 3.5/1.0 -- the chirp-sysid collection gains), NOT a1.py's
+        # swing-tuned 200/90 & 3.0/0.5: the real wrist kd=1.0 (vs 0.5) doubles wrist damping, which kills
+        # the explicit-PD ringing that otherwise blows up joint_acc/jerk (~550 rad/s^2, drowning the task
+        # reward), AND is the true sim-to-real target. Small armature on the wrist (r4-7, near-zero link
+        # inertia) prevents explicit-PD discrete instability at 200Hz. Gain DR (randomize_actuator_gains)
+        # stays valid: for explicit actuators it scales actuator.stiffness/damping and SKIPS the PhysX
+        # write, so no double-drive. ---
+        _REAL_KP = {"r1": 300.0, "r2": 300.0, "r3": 300.0, "r4": 120.0, "r5": 120.0, "r6": 120.0, "r7": 120.0}
+        _REAL_KD = {"r1": 3.5, "r2": 3.5, "r3": 3.5, "r4": 1.0, "r5": 1.0, "r6": 1.0, "r7": 1.0}
+        self.scene.robot.actuators["right_arm"] = IdealPDActuatorCfg(
+            joint_names_expr=["r[1-7]"],
+            effort_limit=A1_ARM_EFFORT,
+            velocity_limit=A1_ARM_VELOCITY,
+            stiffness=_REAL_KP,
+            damping=_REAL_KD,
+            armature={"r4": 0.005, "r5": 0.005, "r6": 0.005, "r7": 0.01},
+        )
         # Curriculum (3): switch the reference source to the baked real serves (lazy-loaded
         # on the first reset onto env.device).
         if HITTRACK_USE_BAKED:

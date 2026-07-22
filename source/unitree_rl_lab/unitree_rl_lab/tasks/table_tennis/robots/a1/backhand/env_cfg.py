@@ -210,8 +210,8 @@ class ActionsCfg:
         joint_names=RIGHT_ARM_JOINT_NAMES,
         command_name="motion",
         residual_scale=[0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03],  # 0.05->0.03: pure-ref 证实参考已对中 (middle min_gap 0.069), 残差只在 wander; 收 multi-joint FK 漂移授权 (0.05 仍漂 +0.08 dy)
-        action_delay_substeps_min=1,   # {1,2,3} 子步 = {5,10,15}ms (均值 10ms)
-        action_delay_substeps_max=3,
+        action_delay_substeps_min=8,   # {8..18} 子步 = 40-90ms (均值 65ms); 0716 实测真机 cmd->response
+        action_delay_substeps_max=18,  # transport ~63ms (chirp xcorr, 频率无关 dead-time, corr0.994), 覆盖 deploy 40-110ms; 旧 1-3(5-15ms)欠延迟~4x
     )
     phase_speed = mdp.PhaseSpeedActionCfg(
         asset_name="robot",
@@ -315,6 +315,16 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         jp = dict(self.scene.robot.init_state.joint_pos)
         jp["joint_lift"] = JOINT_LIFT
         self.scene.robot.init_state.joint_pos = jp
+        # 反手 A1 臂对齐真机 MIT 锚点: r1-3 kp300/kd3.5, r4-7 kp120/kd1.0 (chirp sysid 的采集增益;
+        # 2026-07-15 用户决定 sim->real 对齐, 取代 a1.py 为 HitTrack swing 调低的 kp200/90 & kd3.0/0.5).
+        # 深拷贝 actuator + 新 dict, 防止污染共享的 A1_TABLE_TENNIS_CFG (forehand/hittrack 保留各自增益).
+        import copy
+        _acts = dict(self.scene.robot.actuators)
+        _arm = copy.deepcopy(_acts["right_arm"])
+        _arm.stiffness = {"r1": 300.0, "r2": 300.0, "r3": 300.0, "r4": 120.0, "r5": 120.0, "r6": 120.0, "r7": 120.0}
+        _arm.damping = {"r1": 3.5, "r2": 3.5, "r3": 3.5, "r4": 1.0, "r5": 1.0, "r6": 1.0, "r7": 1.0}
+        _acts["right_arm"] = _arm
+        self.scene.robot.actuators = _acts
         # A6: 不加观测噪声 / PD / 力矩 / 球桌物理随机 (DR 仅发球 + 动作延迟 + 球观测延迟)
         self.observations.policy.enable_corruption = False
 
